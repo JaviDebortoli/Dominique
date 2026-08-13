@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  Project: Dominique — pickup-only online store for women's clothing and
+  accessories ("talles reales"), Santiago del Estero, Argentina.
+  Tech stack: Next.js (TypeScript, App Router) + PostgreSQL + Prisma + Tailwind.
+  Architecture: single codebase — storefront, admin panel, and API route handlers.
+  Payments: MercadoPago Checkout Pro (server-verified webhook) + cash/transfer
+  reserved at pickup. No shipping/carrier integration.
+  Hosting: DonWeb VPS — PM2/systemd + Nginx reverse proxy + Let's Encrypt.
+  Design: ejemplo/DESIGN.md tokens (Editorial Minimalist, Bodoni Moda +
+  Hanken Grotesk, black/white/nude-pink #EBCFC4, 0px corners).
+  Locale: Spanish (Argentina) only, no i18n.
+  Testing: to be established during design/tasks phases.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Keep under 450 words
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - User-facing copy in specs is Spanish (es-AR); spec prose stays English
+  design:
+    - Document architecture decisions with rationale
+    - Include sequence diagrams for payment and stock flows
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow ejemplo/DESIGN.md tokens for all UI
+      - Never trust client-side payment redirect params
+    tdd: true
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

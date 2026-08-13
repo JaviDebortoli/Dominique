@@ -1,0 +1,239 @@
+// Prisma schema for Dominique — pickup-only e-commerce MVP.
+// See openspec/changes/dominique-ecommerce/design.md for the data model
+// sketch and openspec/changes/dominique-ecommerce/specs/** for the
+// requirements each field/constraint backs.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URL is configured in prisma.config.ts (Prisma 7).
+}
+
+// ---------------------------------------------------------------------------
+// Catalog (see specs/product-catalog/spec.md)
+// ---------------------------------------------------------------------------
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id          String         @id @default(cuid())
+  name        String
+  slug        String         @unique
+  description String?
+  price       Decimal        @db.Decimal(10, 2)
+  categoryId  String
+  category    Category       @relation(fields: [categoryId], references: [id])
+  variants    Variant[]
+  images      ProductImage[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([categoryId])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// Per-variant stock (see specs/inventory-stock/spec.md).
+// `onHand` = units physically in store; `held` = units committed to unpaid
+// orders (reserved-unpaid or pending-payment holds). available = onHand - held.
+// onHand/held are only ever mutated by src/modules/inventory/stock.service.ts
+// via the conditional UPDATE in design.md's Interfaces section (D3); the
+// onHand >= 0 / held >= 0 CHECK constraints below are the last-line DB
+// guarantee against oversell bugs — Prisma has no declarative CHECK
+// attribute, so they are added by hand in the generated migration SQL
+// (see prisma/migrations/**/migration.sql).
+model Variant {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size          String
+  color         String
+  sku           String   @unique
+  priceOverride Decimal? @db.Decimal(10, 2)
+  onHand        Int      @default(0)
+  held          Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orderItems     OrderItem[]
+  stockMovements StockMovement[]
+
+  @@unique([productId, size, color])
+  @@index([productId])
+  @@map("variants")
+}
+
+// ---------------------------------------------------------------------------
+// Orders, payments, stock ledger
+// (see specs/order-lifecycle, cart-checkout, payment-mercadopago,
+//  pickup-reservation, inventory-stock)
+// ---------------------------------------------------------------------------
+
+enum OrderMethod {
+  MP
+  PICKUP_CASH
+}
+
+// PENDING_PAYMENT -> PAID | CANCELLED | EXPIRED   (MercadoPago path)
+// RESERVED        -> PAID/PICKED_UP | CANCELLED | EXPIRED  (pickup cash/transfer path)
+// PICKED_UP is terminal; stock is never touched again after it.
+enum OrderStatus {
+  PENDING_PAYMENT
+  RESERVED
+  PAID
+  PICKED_UP
+  EXPIRED
+  CANCELLED
+}
+
+model Order {
+  id         String      @id @default(cuid())
+  publicCode String      @unique
+  buyerName  String
+  phone      String
+  email      String
+  method     OrderMethod
+  status     OrderStatus @default(PENDING_PAYMENT)
+  // Set at creation: PENDING_PAYMENT -> now()+30min (D5); extended to
+  // now()+3d if MercadoPago reports `pending`. RESERVED -> closing time of
+  // the next open business day (StoreHours + Holiday). Null once terminal.
+  expiresAt  DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  items          OrderItem[]
+  payment        Payment?
+  stockMovements StockMovement[]
+
+  @@index([status, expiresAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   Variant @relation(fields: [variantId], references: [id])
+  qty       Int
+  unitPrice Decimal @db.Decimal(10, 2)
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+// Idempotency for the MercadoPago webhook (D4): duplicate mpPaymentId ->
+// unique violation -> handled as a 200 no-op by the webhook route.
+model Payment {
+  id          String   @id @default(cuid())
+  orderId     String   @unique
+  order       Order    @relation(fields: [orderId], references: [id])
+  mpPaymentId String   @unique
+  status      String
+  rawPayload  Json
+  amount      Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  @@map("payments")
+}
+
+enum StockMovementReason {
+  HOLD
+  RELEASE
+  PAID
+  IN_STORE_SALE
+  ADJUSTMENT
+  EXPIRE
+}
+
+// Audit ledger for every onHand/held mutation (see design.md's Interfaces
+// section and the inventory-stock "Manual Admin Reconciliation" scenario).
+model StockMovement {
+  id        String              @id @default(cuid())
+  variantId String
+  variant   Variant             @relation(fields: [variantId], references: [id])
+  delta     Int
+  reason    StockMovementReason
+  orderId   String?
+  order     Order?              @relation(fields: [orderId], references: [id])
+  actorId   String?
+  actor     AdminUser?          @relation(fields: [actorId], references: [id])
+  at        DateTime            @default(now())
+
+  @@index([variantId])
+  @@index([orderId])
+  @@map("stock_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Admin / store operations
+// ---------------------------------------------------------------------------
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+
+  stockMovements StockMovement[]
+
+  @@map("admin_users")
+}
+
+// Seed default: Monday-Friday open, Saturday/Sunday closed=true (owner
+// decision, see design.md "Confirmed defaults").
+model StoreHours {
+  id       String   @id @default(cuid())
+  // 0 = Sunday ... 6 = Saturday (JS Date#getDay convention).
+  weekday  Int
+  opensAt  DateTime @db.Time
+  closesAt DateTime @db.Time
+  closed   Boolean  @default(false)
+
+  @@unique([weekday])
+  @@map("store_hours")
+}
+
+// No holidays pre-loaded at seed time; owner adds rows via admin as needed.
+model Holiday {
+  id   String   @id @default(cuid())
+  date DateTime @db.Date
+
+  @@unique([date])
+  @@map("holidays")
+}
+
+model NewsletterSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("newsletter_signups")
+}
