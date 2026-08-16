@@ -3,7 +3,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct } from "./product.service";
 import {
+  createCategory,
+  DuplicateCategorySlugError,
   getCategoryBySlug,
+  listAllCategoriesForAdmin,
   listCategoriesWithThumbnail,
   listProductsByCategory,
 } from "./category.service";
@@ -138,6 +141,95 @@ describe("category.service (integration, real Postgres)", () => {
 
       expect(found).toBeDefined();
       expect(found?.thumbnailUrl).toBeNull();
+    });
+  });
+
+  // tasks.md 2.1 — write path for the admin category-creation slice
+  // (design.md C1/C2/C3, specs/admin-console/spec.md "Product and Variant
+  // Management": category creation, slug uniqueness).
+  describe("createCategory", () => {
+    it("persists a category row with the given name and slug", async () => {
+      const suffix = randomUUID();
+      const slug = `bijouteria-${suffix}`;
+
+      const category = await createCategory(prisma, { name: "Bijouteria", slug });
+      createdCategoryIds.push(category.id);
+
+      expect(category.name).toBe("Bijouteria");
+      expect(category.slug).toBe(slug);
+
+      const saved = await prisma.category.findUnique({ where: { id: category.id } });
+      expect(saved?.slug).toBe(slug);
+    });
+
+    it("throws DuplicateCategorySlugError on a duplicate slug and writes nothing new", async () => {
+      const suffix = randomUUID();
+      const slug = `calzado-${suffix}`;
+
+      const first = await createCategory(prisma, { name: "Calzado", slug });
+      createdCategoryIds.push(first.id);
+
+      const beforeCount = await prisma.category.count({ where: { slug } });
+      expect(beforeCount).toBe(1);
+
+      await expect(createCategory(prisma, { name: "Calzado Otra Vez", slug })).rejects.toThrow(
+        DuplicateCategorySlugError,
+      );
+
+      const afterCount = await prisma.category.count({ where: { slug } });
+      expect(afterCount).toBe(1);
+    });
+
+    it("DuplicateCategorySlugError carries the offending slug", async () => {
+      const suffix = randomUUID();
+      const slug = `accesorios-dup-${suffix}`;
+
+      const first = await createCategory(prisma, { name: "Accesorios", slug });
+      createdCategoryIds.push(first.id);
+
+      try {
+        await createCategory(prisma, { name: "Accesorios Otra Vez", slug });
+        expect.unreachable("expected createCategory to throw");
+      } catch (error) {
+        expect(error).toBeInstanceOf(DuplicateCategorySlugError);
+        expect((error as DuplicateCategorySlugError).slug).toBe(slug);
+        expect((error as Error).name).toBe("DuplicateCategorySlugError");
+      }
+    });
+  });
+
+  describe("listAllCategoriesForAdmin", () => {
+    it("returns each category's productCount and orders by name asc", async () => {
+      const suffix = randomUUID();
+      const zebra = await prisma.category.create({
+        data: { name: `Zebra Admin List ${suffix}`, slug: `zebra-admin-list-${suffix}` },
+      });
+      createdCategoryIds.push(zebra.id);
+      const alpha = await prisma.category.create({
+        data: { name: `Alpha Admin List ${suffix}`, slug: `alpha-admin-list-${suffix}` },
+      });
+      createdCategoryIds.push(alpha.id);
+
+      const productSuffix = randomUUID();
+      const product = await createProduct(prisma, {
+        name: "Producto Alpha List",
+        slug: `producto-alpha-list-${productSuffix}`,
+        price: 12000,
+        categoryId: alpha.id,
+        variants: [{ size: "U", color: "Unico", sku: `ALPHA-${productSuffix}`, onHand: 1 }],
+      });
+      createdProductIds.push(product.id);
+
+      const rows = await listAllCategoriesForAdmin(prisma);
+
+      const alphaRow = rows.find((r) => r.id === alpha.id);
+      const zebraRow = rows.find((r) => r.id === zebra.id);
+      expect(alphaRow?.productCount).toBe(1);
+      expect(zebraRow?.productCount).toBe(0);
+
+      const alphaIndex = rows.findIndex((r) => r.id === alpha.id);
+      const zebraIndex = rows.findIndex((r) => r.id === zebra.id);
+      expect(alphaIndex).toBeLessThan(zebraIndex);
     });
   });
 });

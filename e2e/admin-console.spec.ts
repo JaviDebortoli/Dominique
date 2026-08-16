@@ -61,3 +61,29 @@ test.describe("Admin productos — create a product (tasks.md 7.3)", () => {
     await expect(page.getByText(`Producto E2E ${suffix}`)).toBeVisible();
   });
 });
+
+test.describe("Admin categorias — create a category (tasks.md 6.1)", () => {
+  test("owner creates a category unaided and it appears in both the categories list and the product form's picker", async ({
+    page,
+  }) => {
+    await loginAsAdmin(page);
+
+    await page.goto("/admin/categorias");
+    const suffix = Date.now();
+    const categoryName = `Categoria E2E ${suffix}`;
+
+    await page.getByLabel(/^Nombre/).fill(categoryName);
+    // Slug left at its auto-suggested value (specs/admin-console/spec.md
+    // "Owner creates a category unaided").
+    await page.getByRole("button", { name: "Crear categoría" }).click();
+
+    const row = page.getByRole("row", { name: new RegExp(categoryName) });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("0"); // product count
+
+    await page.goto("/admin/productos/nuevo");
+    await expect(
+      page.getByLabel("Categoría").locator(`option:has-text("${categoryName}")`),
+    ).toBeAttached();
+  });
+});

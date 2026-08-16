@@ -3,11 +3,11 @@
 // lives in the module, not here — the same pattern app/api/checkout/route.ts
 // already follows).
 //
-// NOT covered by src/middleware.ts's matcher (deliberately — see that
-// file's module doc: /api/admin/* checks its own session so it can return a
-// JSON 401 instead of an HTML redirect a fetch()-based admin UI can't
-// usefully follow). Backs specs/admin-console/spec.md "Authenticated
-// Access" and "Product and Variant Management". tasks.md 7.1/7.3.
+// NOT covered by src/proxy.ts's matcher (deliberately — see that file's
+// module doc: /api/admin/* checks its own session so it can return a JSON
+// 401 instead of an HTML redirect a fetch()-based admin UI can't usefully
+// follow). Backs specs/admin-console/spec.md "Authenticated Access" and
+// "Product and Variant Management". tasks.md 7.1/7.3.
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";

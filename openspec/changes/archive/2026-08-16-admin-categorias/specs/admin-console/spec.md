@@ -1,10 +1,8 @@
-# Admin Console Specification
+# Delta for admin-console
 
-## Purpose
+**Type**: Delta — modifies the existing `admin-console` capability (no new capability domain). Adds category-creation scenarios to requirements already present in `openspec/specs/admin-console/spec.md`.
 
-Defines the authenticated staff panel for catalog management, order status updates, and the real-time stock check staff need before any in-person sale.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Authenticated Access
 
@@ -72,29 +70,3 @@ Staff MUST be able to create, edit, and deactivate products, categories, variant
 - WHEN a customer browses to that category's storefront page
 - THEN the page SHALL render using the existing null-safe thumbnail handling
 - AND no new filtering or hiding logic SHALL exclude the empty category from view
-
-### Requirement: Order Status Management
-
-Staff MUST be able to view orders and transition their status per the order-lifecycle spec.
-
-#### Scenario: Staff updates order status
-
-- GIVEN an order is `paid`
-- WHEN staff marks it `ready for pickup`
-- THEN the order's status SHALL update and be visible to the customer via order lookup
-
-### Requirement: Real-Time-Accurate Stock View Before In-Person Sale (HARD RULE)
-
-The admin console MUST provide staff a stock view reflecting real-time availability — including immediate decrements from confirmed MercadoPago payments — and staff MUST consult it before completing any physical/in-person sale.
-
-#### Scenario: Staff checks stock before an in-store sale
-
-- GIVEN a variant was just sold online and paid via MercadoPago moments ago
-- WHEN staff open the admin stock view before ringing up an in-person sale of that same variant
-- THEN the view SHALL already show the reduced (or zero) available quantity, preventing a double-sell
-
-#### Scenario: Reserved-unpaid stock shown distinctly
-
-- GIVEN a variant has both reserved-unpaid and sold-paid units
-- WHEN staff view its stock breakdown
-- THEN the view SHALL distinguish available, reserved-unpaid, and sold-paid quantities

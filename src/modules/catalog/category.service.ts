@@ -19,6 +19,78 @@
 
 import type { Category, PrismaClient, Product, ProductImage } from "@/generated/prisma/client";
 
+// Category write path — admin-categorias change (design.md C1/C2/C3).
+// Mirrors product.service.ts's createProduct/DuplicateVariantError shape:
+// the module owns the invariant (slug uniqueness), the route owns request
+// shape validation.
+export class DuplicateCategorySlugError extends Error {
+  constructor(public readonly slug: string) {
+    super(`A category with slug "${slug}" already exists.`);
+    this.name = "DuplicateCategorySlugError";
+  }
+}
+
+export interface CreateCategoryInput {
+  name: string;
+  slug: string;
+}
+
+/**
+ * Creates a category. Precondition: `slug` is already format-valid (see
+ * `isValidSlug` in src/lib/slugify.ts) — the route adapter validates format
+ * before calling this. Relies solely on the DB's `slug @unique` constraint
+ * (Prisma error code P2002) to detect a duplicate, rather than a pre-check
+ * `findUnique` (design.md C2: race-free, avoids an extra round-trip and the
+ * TOCTOU window a pre-check would still need to handle via catch anyway).
+ */
+export async function createCategory(
+  prisma: PrismaClient,
+  input: CreateCategoryInput,
+): Promise<Category> {
+  try {
+    return await prisma.category.create({
+      data: { name: input.name, slug: input.slug },
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2002"
+    ) {
+      throw new DuplicateCategorySlugError(input.slug);
+    }
+    throw error;
+  }
+}
+
+export interface AdminCategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  productCount: number;
+}
+
+/**
+ * Lists every category with its product count, ordered by name asc, for
+ * the /admin/categorias list page (specs/admin-console/spec.md "Product and
+ * Variant Management").
+ */
+export async function listAllCategoriesForAdmin(
+  prisma: PrismaClient,
+): Promise<AdminCategoryRow[]> {
+  const categories = await prisma.category.findMany({
+    orderBy: { name: "asc" },
+    include: { _count: { select: { products: true } } },
+  });
+
+  return categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    slug: category.slug,
+    productCount: category._count.products,
+  }));
+}
+
 export async function getCategoryBySlug(
   prisma: PrismaClient,
   slug: string,

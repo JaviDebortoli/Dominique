@@ -1,9 +1,9 @@
 // Authenticated admin console shell — nav + sign-out, wraps caja/productos/
-// pedidos (NOT /admin/login, which lives outside this route group).
-// middleware.ts already blocks unauthenticated access before this layout
-// ever renders (design.md D7) — the auth() call below is a defense-in-depth
-// read for displaying the logged-in staff member's email, not a second
-// gate.
+// categorias/pedidos (NOT /admin/login, which lives outside this route
+// group). src/proxy.ts already blocks unauthenticated access before this
+// layout ever renders (design.md D7) — the auth() call below is a
+// defense-in-depth read for displaying the logged-in staff member's email,
+// not a second gate.
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { signOutAction } from "./actions";
@@ -17,6 +17,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
         <nav className="flex gap-6 font-sans text-body-md text-ink">
           <Link href="/admin/caja">Caja</Link>
           <Link href="/admin/productos">Productos</Link>
+          <Link href="/admin/categorias">Categorías</Link>
           <Link href="/admin/pedidos">Pedidos</Link>
         </nav>
         <div className="flex items-center gap-4 font-sans text-body-md text-ink">
