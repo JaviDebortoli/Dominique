@@ -4,11 +4,25 @@ import { prisma } from "@/lib/db";
 import {
   addVariant,
   createProduct,
+  deleteProduct,
+  deleteVariant,
+  DuplicateSkuError,
   DuplicateVariantError,
   getProductBySlug,
   isProductIncomplete,
+  LastVariantError,
   listAllProductsForAdmin,
   listCuratedProducts,
+  ProductCategoryNotFoundError,
+  ProductHasHistoryError,
+  ProductHasStockError,
+  ProductNotFoundError,
+  updateProduct,
+  updateVariant,
+  VariantAttributesImmutableError,
+  VariantHasHistoryError,
+  VariantHasStockError,
+  VariantNotFoundError,
 } from "./product.service";
 
 // Integration tests against the real local Postgres (design.md Testing
@@ -249,6 +263,417 @@ describe("product.service (integration, real Postgres)", () => {
       expect(found?.category.id).toBe(category.id);
       expect(found?.variants).toHaveLength(1);
       expect(found?.images).toHaveLength(1);
+    });
+  });
+
+  // tasks.md 1.1/1.2 — design.md F1: updateProduct never writes slug.
+  describe("updateProduct — Product edit (F1)", () => {
+    it("persists name/description/price/categoryId and leaves slug byte-identical", async () => {
+      const category = await makeCategory("update-product-a");
+      const otherCategory = await makeCategory("update-product-b");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Vestido Original",
+        slug: `vestido-original-${suffix}`,
+        description: "Descripcion original",
+        price: 10000,
+        categoryId: category.id,
+        variants: [{ size: "M", color: "Negro", sku: `UPD-M-NEG-${suffix}`, onHand: 1 }],
+      });
+      createdProductIds.push(product.id);
+
+      const updated = await updateProduct(prisma, product.id, {
+        name: "Vestido Actualizado",
+        description: "Descripcion nueva",
+        price: 15000,
+        categoryId: otherCategory.id,
+      });
+
+      expect(updated.name).toBe("Vestido Actualizado");
+      expect(updated.description).toBe("Descripcion nueva");
+      expect(Number(updated.price)).toBe(15000);
+      expect(updated.categoryId).toBe(otherCategory.id);
+      expect(updated.slug).toBe(product.slug);
+    });
+
+    it("throws ProductNotFoundError for an unknown product id", async () => {
+      await expect(
+        updateProduct(prisma, `nope-${randomUUID()}`, { name: "X" }),
+      ).rejects.toThrow(ProductNotFoundError);
+    });
+
+    it("throws ProductCategoryNotFoundError for an unknown categoryId", async () => {
+      const category = await makeCategory("update-product-c");
+      const suffix = randomUUID();
+      const product = await createProduct(prisma, {
+        name: "Vestido C",
+        slug: `vestido-c-${suffix}`,
+        price: 10000,
+        categoryId: category.id,
+        variants: [{ size: "M", color: "Negro", sku: `UPD-C-${suffix}`, onHand: 1 }],
+      });
+      createdProductIds.push(product.id);
+
+      await expect(
+        updateProduct(prisma, product.id, { categoryId: `nope-${randomUUID()}` }),
+      ).rejects.toThrow(ProductCategoryNotFoundError);
+    });
+  });
+
+  // tasks.md 1.3/1.4 — design.md F2/F3: pre-check onHand, DB-adjudicated
+  // history via P2003.
+  describe("deleteProduct — Product delete (F2/F3)", () => {
+    it("throws ProductHasHistoryError with exact counts and deletes nothing when a variant has an OrderItem row", async () => {
+      const category = await makeCategory("delete-product-history");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Historial",
+        slug: `producto-historial-${suffix}`,
+        price: 20000,
+        categoryId: category.id,
+        variants: [{ size: "M", color: "Negro", sku: `HIST-M-NEG-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+      const variant = product.variants[0];
+
+      const order = await prisma.order.create({
+        data: {
+          publicCode: `HIST-${suffix}`,
+          buyerName: "Compradora Test",
+          phone: "3800000000",
+          email: "test@example.com",
+          method: "PICKUP_CASH",
+          status: "PAID",
+          items: { create: [{ variantId: variant.id, qty: 1, unitPrice: 20000 }] },
+        },
+      });
+      await prisma.stockMovement.create({
+        data: { variantId: variant.id, delta: 1, reason: "PAID", orderId: order.id },
+      });
+
+      try {
+        await deleteProduct(prisma, product.id);
+        expect.unreachable("deleteProduct should have thrown ProductHasHistoryError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ProductHasHistoryError);
+        const historyError = error as ProductHasHistoryError;
+        expect(historyError.orderItemCount).toBe(1);
+        expect(historyError.stockMovementCount).toBe(1);
+      }
+
+      const stillExists = await prisma.product.findUnique({ where: { id: product.id } });
+      expect(stillExists).not.toBeNull();
+
+      // Unblock afterAll's cleanup: RESTRICT on variantId means the order's
+      // history rows must go before the product's cascading variant delete.
+      await prisma.stockMovement.deleteMany({ where: { orderId: order.id } });
+      await prisma.order.delete({ where: { id: order.id } });
+    });
+
+    it("succeeds on a clean product and cascades its variants + images away", async () => {
+      const category = await makeCategory("delete-product-clean");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Limpio",
+        slug: `producto-limpio-${suffix}`,
+        price: 18000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Blanco", sku: `CLEAN-${suffix}`, onHand: 0 }],
+        images: [{ url: "/uploads/producto-limpio.jpg", position: 0 }],
+      });
+      const variantId = product.variants[0].id;
+      const imageId = product.images[0].id;
+
+      await deleteProduct(prisma, product.id);
+
+      expect(await prisma.product.findUnique({ where: { id: product.id } })).toBeNull();
+      expect(await prisma.variant.findUnique({ where: { id: variantId } })).toBeNull();
+      expect(await prisma.productImage.findUnique({ where: { id: imageId } })).toBeNull();
+    });
+
+    it("throws ProductHasStockError naming the SKU for a variant with onHand > 0 and no StockMovement row", async () => {
+      const category = await makeCategory("delete-product-stock");
+      const suffix = randomUUID();
+      const sku = `STOCK-${suffix}`;
+
+      const product = await createProduct(prisma, {
+        name: "Producto Con Stock",
+        slug: `producto-con-stock-${suffix}`,
+        price: 22000,
+        categoryId: category.id,
+        variants: [{ size: "M", color: "Negro", sku, onHand: 5 }],
+      });
+      createdProductIds.push(product.id);
+
+      await expect(deleteProduct(prisma, product.id)).rejects.toThrow(ProductHasStockError);
+
+      try {
+        await deleteProduct(prisma, product.id);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ProductHasStockError);
+        expect((error as ProductHasStockError).skus).toEqual([sku]);
+      }
+
+      expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+    });
+
+    it("throws ProductNotFoundError for an unknown product id", async () => {
+      await expect(deleteProduct(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
+        ProductNotFoundError,
+      );
+    });
+  });
+
+  // tasks.md 1.5/1.6 — design.md F4: last-variant unconditional, then
+  // onHand > 0, then DB-adjudicated history via P2003. No $transaction.
+  describe("deleteVariant — Variant delete (F4)", () => {
+    it("throws LastVariantError when one variant remains, even if that variant is clean", async () => {
+      const category = await makeCategory("delete-variant-last");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Unica Variante",
+        slug: `producto-unica-variante-${suffix}`,
+        price: 15000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `LAST-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+      const variant = product.variants[0];
+
+      await expect(deleteVariant(prisma, variant.id)).rejects.toThrow(LastVariantError);
+
+      try {
+        await deleteVariant(prisma, variant.id);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LastVariantError);
+        expect((error as LastVariantError).productId).toBe(product.id);
+        expect((error as LastVariantError).variantId).toBe(variant.id);
+      }
+
+      expect(await prisma.variant.findUnique({ where: { id: variant.id } })).not.toBeNull();
+    });
+
+    it("throws VariantHasStockError for onHand > 0", async () => {
+      const category = await makeCategory("delete-variant-stock");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante Stock",
+        slug: `producto-variante-stock-${suffix}`,
+        price: 16000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `VSTOCK-S-${suffix}`, onHand: 3 },
+          { size: "M", color: "Negro", sku: `VSTOCK-M-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const stockedVariant = product.variants.find((v) => v.onHand > 0)!;
+
+      try {
+        await deleteVariant(prisma, stockedVariant.id);
+        expect.unreachable("deleteVariant should have thrown VariantHasStockError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(VariantHasStockError);
+        const stockError = error as VariantHasStockError;
+        expect(stockError.variantId).toBe(stockedVariant.id);
+        expect(stockError.sku).toBe(stockedVariant.sku);
+        expect(stockError.onHand).toBe(3);
+      }
+
+      expect(
+        await prisma.variant.findUnique({ where: { id: stockedVariant.id } }),
+      ).not.toBeNull();
+    });
+
+    it("throws VariantHasHistoryError for a StockMovement row", async () => {
+      const category = await makeCategory("delete-variant-history");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante Historial",
+        slug: `producto-variante-historial-${suffix}`,
+        price: 17000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `VHIST-S-${suffix}`, onHand: 0 },
+          { size: "M", color: "Negro", sku: `VHIST-M-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const [targetVariant] = product.variants;
+
+      await prisma.stockMovement.create({
+        data: { variantId: targetVariant.id, delta: 1, reason: "ADJUSTMENT" },
+      });
+
+      try {
+        await deleteVariant(prisma, targetVariant.id);
+        expect.unreachable("deleteVariant should have thrown VariantHasHistoryError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(VariantHasHistoryError);
+        const historyError = error as VariantHasHistoryError;
+        expect(historyError.variantId).toBe(targetVariant.id);
+        expect(historyError.orderItemCount).toBe(0);
+        expect(historyError.stockMovementCount).toBe(1);
+      }
+
+      expect(await prisma.variant.findUnique({ where: { id: targetVariant.id } })).not.toBeNull();
+
+      await prisma.stockMovement.deleteMany({ where: { variantId: targetVariant.id } });
+    });
+
+    it("succeeds on a clean non-last variant", async () => {
+      const category = await makeCategory("delete-variant-clean");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Dos Variantes",
+        slug: `producto-dos-variantes-${suffix}`,
+        price: 19000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `CLEANV-S-${suffix}`, onHand: 0 },
+          { size: "M", color: "Negro", sku: `CLEANV-M-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const [toDelete, remaining] = product.variants;
+
+      await deleteVariant(prisma, toDelete.id);
+
+      expect(await prisma.variant.findUnique({ where: { id: toDelete.id } })).toBeNull();
+      expect(await prisma.variant.findUnique({ where: { id: remaining.id } })).not.toBeNull();
+      expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+    });
+
+    it("throws VariantNotFoundError for an unknown variant id", async () => {
+      await expect(deleteVariant(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
+        VariantNotFoundError,
+      );
+    });
+  });
+
+  // tasks.md 1.7/1.8 — design.md F5/F6/F7: resolved-pair pre-check for
+  // size/color, P2002 catch for sku, OrderItem gate on size/color.
+  describe("updateVariant — Variant edit (F5/F6)", () => {
+    it("changes sku", async () => {
+      const category = await makeCategory("update-variant-sku");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante SKU",
+        slug: `producto-variante-sku-${suffix}`,
+        price: 14000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `OLD-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+      const variant = product.variants[0];
+      const newSku = `NEW-${suffix}`;
+
+      const updated = await updateVariant(prisma, variant.id, { sku: newSku });
+
+      expect(updated.sku).toBe(newSku);
+    });
+
+    it("rejects a duplicate sku with DuplicateSkuError", async () => {
+      const category = await makeCategory("update-variant-dupsku");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante Dup SKU",
+        slug: `producto-variante-dupsku-${suffix}`,
+        price: 13000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `DUPSKU-A-${suffix}`, onHand: 0 },
+          { size: "M", color: "Negro", sku: `DUPSKU-B-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const [variantA, variantB] = product.variants;
+
+      await expect(
+        updateVariant(prisma, variantA.id, { sku: variantB.sku }),
+      ).rejects.toThrow(DuplicateSkuError);
+    });
+
+    it("rejects a size/color change colliding with a sibling's resolved pair via DuplicateVariantError", async () => {
+      const category = await makeCategory("update-variant-duppair");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante Dup Pair",
+        slug: `producto-variante-duppair-${suffix}`,
+        price: 13500,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `DUPPAIR-A-${suffix}`, onHand: 0 },
+          { size: "M", color: "Negro", sku: `DUPPAIR-B-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const [variantA] = product.variants;
+
+      // variantA is (S, Negro); resolving only `size: "M"` over its current
+      // color "Negro" yields (M, Negro), which collides with variantB.
+      await expect(
+        updateVariant(prisma, variantA.id, { size: "M" }),
+      ).rejects.toThrow(DuplicateVariantError);
+    });
+
+    it("rejects size/color with VariantAttributesImmutableError once an OrderItem exists, while sku-only still succeeds", async () => {
+      const category = await makeCategory("update-variant-immutable");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Variante Historial",
+        slug: `producto-variante-immutable-${suffix}`,
+        price: 21000,
+        categoryId: category.id,
+        variants: [{ size: "S", color: "Negro", sku: `IMMUT-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+      const variant = product.variants[0];
+
+      const order = await prisma.order.create({
+        data: {
+          publicCode: `IMMUT-${suffix}`,
+          buyerName: "Compradora Immut",
+          phone: "3800000001",
+          email: "immut@example.com",
+          method: "PICKUP_CASH",
+          status: "PAID",
+          items: { create: [{ variantId: variant.id, qty: 1, unitPrice: 21000 }] },
+        },
+      });
+
+      try {
+        await updateVariant(prisma, variant.id, { color: "Blanco" });
+        expect.unreachable("updateVariant should have thrown VariantAttributesImmutableError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(VariantAttributesImmutableError);
+        const immutableError = error as VariantAttributesImmutableError;
+        expect(immutableError.variantId).toBe(variant.id);
+        expect(immutableError.orderItemCount).toBe(1);
+      }
+
+      const newSku = `IMMUT-SKU-${suffix}`;
+      const updated = await updateVariant(prisma, variant.id, { sku: newSku });
+      expect(updated.sku).toBe(newSku);
+
+      await prisma.order.delete({ where: { id: order.id } });
+    });
+
+    it("throws VariantNotFoundError for an unknown variant id", async () => {
+      await expect(
+        updateVariant(prisma, `nope-${randomUUID()}`, { sku: "whatever" }),
+      ).rejects.toThrow(VariantNotFoundError);
     });
   });
 });
