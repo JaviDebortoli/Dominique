@@ -15,10 +15,13 @@ import { listAllProductsForAdmin } from "@/modules/catalog/product.service";
 import { ProductRow } from "./ProductRow";
 
 export default async function AdminProductsPage() {
-  const [products, categories] = await Promise.all([
-    listAllProductsForAdmin(prisma),
-    prisma.category.findMany({ orderBy: { name: "asc" } }),
-  ]);
+  // Sequential, not Promise.all — matches productos/nuevo/page.tsx:12's
+  // single-query precedent; the local pglite dev proxy this project runs
+  // against does not handle concurrent queries from one PrismaClient
+  // reliably (this session's own "Connection terminated unexpectedly"
+  // flake under Promise.all here).
+  const products = await listAllProductsForAdmin(prisma);
+  const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
   const categoryOptions = categories.map((category) => ({
     id: category.id,
     name: category.name,
