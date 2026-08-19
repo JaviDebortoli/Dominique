@@ -3,8 +3,13 @@
 // /nuevo route — router.refresh() re-renders this same server component).
 // Backs specs/admin-console/spec.md "Product and Variant Management":
 // "Owner creates a category unaided". tasks.md 4.3.
+//
+// Acciones column added by the admin-categorias-edicion change (design.md
+// E6): each row is a client CategoryRow with inline rename/delete, keeping
+// this page an RSC. tasks.md 3.3.
 import { prisma } from "@/lib/db";
 import { listAllCategoriesForAdmin } from "@/modules/catalog/category.service";
+import { CategoryRow } from "./CategoryRow";
 import { NewCategoryForm } from "./NewCategoryForm";
 
 export default async function AdminCategoriasPage() {
@@ -21,19 +26,16 @@ export default async function AdminCategoriasPage() {
               <th className="py-2">Categoría</th>
               <th className="py-2">Slug</th>
               <th className="py-2 text-right">Productos</th>
+              <th className="py-2 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {categories.map((category) => (
-              <tr key={category.id} className="border-b border-ink/10">
-                <td className="py-2">{category.name}</td>
-                <td className="py-2">{category.slug}</td>
-                <td className="py-2 text-right">{category.productCount}</td>
-              </tr>
+              <CategoryRow key={category.id} category={category} />
             ))}
             {categories.length === 0 ? (
               <tr>
-                <td colSpan={3} className="py-6 text-center text-outline">
+                <td colSpan={4} className="py-6 text-center text-outline">
                   Todavía no hay categorías. Creá la primera acá abajo.
                 </td>
               </tr>

@@ -35,6 +35,38 @@ export interface CreateCategoryInput {
   slug: string;
 }
 
+// Category edit/delete path — admin-categorias-edicion change (design.md
+// E1-E4). Mirrors DuplicateCategorySlugError's shape.
+export class DuplicateCategoryNameError extends Error {
+  constructor(public readonly name: string) {
+    super(`A category named "${name}" already exists.`);
+    this.name = "DuplicateCategoryNameError";
+  }
+}
+
+export class CategoryNotFoundError extends Error {
+  constructor(public readonly categoryId: string) {
+    super(`Category ${categoryId} not found.`);
+    this.name = "CategoryNotFoundError";
+  }
+}
+
+export class CategoryHasProductsError extends Error {
+  constructor(
+    public readonly categoryId: string,
+    public readonly productCount: number,
+  ) {
+    super(`Category ${categoryId} still has ${productCount} product(s) assigned.`);
+    this.name = "CategoryHasProductsError";
+  }
+}
+
+// No `slug` field — structurally unwritable (design.md E1/E2/E4: rename
+// changes `name` only, `slug` is immutable after creation).
+export interface RenameCategoryInput {
+  name: string;
+}
+
 /**
  * Creates a category. Precondition: `slug` is already format-valid (see
  * `isValidSlug` in src/lib/slugify.ts) — the route adapter validates format
@@ -58,6 +90,80 @@ export async function createCategory(
       (error as { code?: string }).code === "P2002"
     ) {
       throw new DuplicateCategorySlugError(input.slug);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Renames only `name`. `slug` is never written (proposal: immutable, zero
+ * exceptions). Pre-checks for a case-insensitive collision against every
+ * OTHER category (design.md E1/E2: `name` has no DB-level unique constraint,
+ * so a read is the only enforcement available; excluding the row's own id
+ * allows a case-only self-rename, e.g. "Bijou" -> "bijou").
+ *
+ * Uses `findMany` + `toLocaleLowerCase()` comparison in JS, not
+ * `equals`/`mode: "insensitive"` — confirmed at implementation time
+ * (design.md's Open Questions) that Prisma's Postgres connector compiles
+ * `mode: "insensitive"` to `ILIKE`, which treats `%`/`_` in the compared
+ * value as wildcards and would falsely collide a name containing one of
+ * those characters. Safe here: the admin page already renders every
+ * category row (small table, no pagination).
+ *
+ * Throws CategoryNotFoundError (P2025) if the id does not exist.
+ */
+export async function renameCategory(
+  prisma: PrismaClient,
+  id: string,
+  input: RenameCategoryInput,
+): Promise<Category> {
+  const others = await prisma.category.findMany({
+    where: { NOT: { id } },
+    select: { id: true, name: true },
+  });
+  const targetName = input.name.toLocaleLowerCase();
+  const collision = others.some((other) => other.name.toLocaleLowerCase() === targetName);
+  if (collision) {
+    throw new DuplicateCategoryNameError(input.name);
+  }
+
+  try {
+    return await prisma.category.update({
+      where: { id },
+      data: { name: input.name },
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2025"
+    ) {
+      throw new CategoryNotFoundError(id);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Deletes an empty category. The FK's `ON DELETE RESTRICT` (Prisma's
+ * default for a required relation) is the single authority for whether the
+ * delete is blocked (design.md E3): attempt the delete, and only on a
+ * P2003 failure count the referencing products for the error message — the
+ * count never gates the decision, it only explains it.
+ */
+export async function deleteCategory(prisma: PrismaClient, id: string): Promise<void> {
+  try {
+    await prisma.category.delete({ where: { id } });
+  } catch (error) {
+    if (error instanceof Error && "code" in error) {
+      const code = (error as { code?: string }).code;
+      if (code === "P2003") {
+        const productCount = await prisma.product.count({ where: { categoryId: id } });
+        throw new CategoryHasProductsError(id, productCount);
+      }
+      if (code === "P2025") {
+        throw new CategoryNotFoundError(id);
+      }
     }
     throw error;
   }
