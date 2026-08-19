@@ -292,6 +292,16 @@ async function findOrderOrThrow(prisma: PrismaClient, orderId: string): Promise<
  * statement, so a redelivered `mpPaymentId` throws a unique-constraint
  * violation that aborts the whole transaction (nothing decrements a second
  * time) and is translated into `{ duplicate: true }` here.
+ *
+ * design.md "Webhook race" decision (proposal 2026-08-18-admin-cancelar-
+ * pedido): `tx.payment.create()` above runs BEFORE this function's own
+ * `existingOrder.status !== "PENDING_PAYMENT"` check, so a late `approved`
+ * payment for an order staff already cancelled via cancelOrder() still
+ * records its Payment row here (correct — money moved) while the order
+ * stays CANCELLED with its stock already released back to availability.
+ * Reconcile via that Payment row plus the MercadoPago dashboard — accepted
+ * as a known limitation, not defended against with locking/retry machinery
+ * (see cancelOrder()'s doc comment for the mirror note from the staff side).
  */
 export async function confirmPaymentApproved(
   prisma: PrismaClient,
@@ -465,4 +475,47 @@ export async function markPickedUp(prisma: PrismaClient, orderId: string): Promi
   }
 
   throw new InvalidOrderStatusTransitionError(orderId, existingOrder.status, "PICKED_UP");
+}
+
+// ---------------------------------------------------------------------------
+// proposal 2026-08-18-admin-cancelar-pedido — staff-driven "cancel order".
+// ---------------------------------------------------------------------------
+
+/**
+ * Staff cancellation from `/admin/pedidos` (design.md "Positive-guard
+ * branch order" decision). Valid sources are `PENDING_PAYMENT` and
+ * `RESERVED` only — both hold stock exclusively via `held` with `onHand`
+ * never decremented, so the release path is byte-identical for either
+ * source, unlike markPickedUp() which needs two branches because PAID and
+ * RESERVED differ in stock semantics. Any other status (including an
+ * already-CANCELLED order) falls through to the same
+ * InvalidOrderStatusTransitionError markPickedUp() throws — a future
+ * OrderStatus member is rejected, not silently cancelled.
+ *
+ * One `$transaction`: release() every line's held stock (writing a
+ * StockMovement(RELEASE) row per item, design.md Interfaces), then clear
+ * the order to CANCELLED with `expiresAt: null`. See
+ * confirmPaymentApproved()'s doc comment above for the mirror note on the
+ * accepted webhook-race limitation this shares with that function.
+ */
+export async function cancelOrder(prisma: PrismaClient, orderId: string): Promise<PendingOrder> {
+  const existingOrder = await findOrderOrThrow(prisma, orderId);
+
+  if (existingOrder.status === "PENDING_PAYMENT" || existingOrder.status === "RESERVED") {
+    return prisma.$transaction(
+      async (tx) => {
+        for (const item of existingOrder.items) {
+          await release(tx, { variantId: item.variantId, qty: item.qty, orderId: existingOrder.id });
+        }
+        return tx.order.update({
+          where: { id: orderId },
+          data: { status: "CANCELLED", expiresAt: null },
+          include: { items: true },
+        });
+      },
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+  }
+
+  throw new InvalidOrderStatusTransitionError(orderId, existingOrder.status, "CANCELLED");
 }

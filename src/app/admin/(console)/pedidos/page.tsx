@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/db";
 import type { OrderStatus } from "@/generated/prisma/client";
 import { OrderPickupButton } from "@/components/admin/OrderPickupButton";
+import { OrderCancelButton } from "@/components/admin/OrderCancelButton";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,11 @@ const STATUS_LABELS_ES_AR: Record<OrderStatus, string> = {
 };
 
 const PICKUP_ELIGIBLE: OrderStatus[] = ["PAID", "RESERVED"];
+
+// proposal 2026-08-18-admin-cancelar-pedido — cancel is offered only before
+// any payment has committed or reserved-unpaid stock has been picked up;
+// PAID stays out of scope (staff refund manually via MercadoPago).
+const CANCEL_ELIGIBLE: OrderStatus[] = ["PENDING_PAYMENT", "RESERVED"];
 
 export default async function AdminOrdersPage() {
   const orders = await prisma.order.findMany({
@@ -60,9 +66,14 @@ export default async function AdminOrdersPage() {
                 {order.items.reduce((sum, item) => sum + item.qty, 0)}
               </td>
               <td className="py-2">
-                {PICKUP_ELIGIBLE.includes(order.status) ? (
-                  <OrderPickupButton orderId={order.id} />
-                ) : null}
+                <div className="flex flex-col items-end gap-2">
+                  {PICKUP_ELIGIBLE.includes(order.status) ? (
+                    <OrderPickupButton orderId={order.id} />
+                  ) : null}
+                  {CANCEL_ELIGIBLE.includes(order.status) ? (
+                    <OrderCancelButton orderId={order.id} publicCode={order.publicCode} />
+                  ) : null}
+                </div>
               </td>
             </tr>
           ))}
