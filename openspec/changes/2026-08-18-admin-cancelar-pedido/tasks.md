@@ -46,6 +46,10 @@ Chain strategy: pending
 
 - [x] 4.1 GREEN: `src/app/admin/(console)/pedidos/page.tsx` — add `CANCEL_ELIGIBLE: OrderStatus[] = ["PENDING_PAYMENT", "RESERVED"]`, wrap the action cell in `<div className="flex flex-col items-end gap-2">` with pickup button then conditional `<OrderCancelButton orderId={order.id} publicCode={order.publicCode} />`. Visibility for `RESERVED` (both buttons) and non-eligible statuses (neither) verified manually against spec's "Cancel affordance visibility" scenario — no dedicated page test exists for the sibling `PICKUP_ELIGIBLE` array either; Phase 3's component test already covers the button's own behavior.
 
+## Post-Verify Remediation
+
+- [x] 4.2 RED→GREEN: `src/app/admin/(console)/pedidos/page.test.tsx` — closes sdd-verify's CRITICAL finding on task 4.1's manual-only verification. Renders the real `AdminOrdersPage` RSC directly (mirrors `/pedido/[code]/page.test.tsx`'s precedent) against real-Postgres orders seeded in every `OrderStatus`, asserting `Cancelar` renders only for `PENDING_PAYMENT`/`RESERVED` (including the `RESERVED` both-buttons case) and is hidden for `PAID`/`PICKED_UP`/`EXPIRED`/`CANCELLED`. RED confirmed first (missing `next/navigation` mock for the client button descendants → `invariant expected app router to be mounted`), then GREEN after adding the mock (mirrors `OrderCancelButton.test.tsx`'s convention). Commit `c9d8003` on `feat/admin-cancelar-pedido` (new commit, `8bdba7b` untouched).
+
 ## Open Items Carried Forward (from design.md)
 
 - Refunding a `PAID` order stays manual via the MercadoPago dashboard — out of scope, explicitly named in the 409 message.
