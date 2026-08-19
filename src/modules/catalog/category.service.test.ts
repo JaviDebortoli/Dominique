@@ -3,12 +3,17 @@ import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct } from "./product.service";
 import {
+  CategoryHasProductsError,
+  CategoryNotFoundError,
   createCategory,
+  deleteCategory,
+  DuplicateCategoryNameError,
   DuplicateCategorySlugError,
   getCategoryBySlug,
   listAllCategoriesForAdmin,
   listCategoriesWithThumbnail,
   listProductsByCategory,
+  renameCategory,
 } from "./category.service";
 
 // Integration tests against the real local Postgres, mirroring
@@ -230,6 +235,136 @@ describe("category.service (integration, real Postgres)", () => {
       const alphaIndex = rows.findIndex((r) => r.id === alpha.id);
       const zebraIndex = rows.findIndex((r) => r.id === zebra.id);
       expect(alphaIndex).toBeLessThan(zebraIndex);
+    });
+  });
+
+  // tasks.md 1.1 — rename/delete write paths for the admin category-edit
+  // slice (design.md E1-E4, specs/admin-console/spec.md "Product and
+  // Variant Management": rename, duplicate-name rejection, delete,
+  // delete-blocked, not-found handling).
+  describe("renameCategory", () => {
+    it("persists the new name and leaves slug byte-identical", async () => {
+      const suffix = randomUUID();
+      const category = await prisma.category.create({
+        data: { name: `Original Name ${suffix}`, slug: `original-name-${suffix}` },
+      });
+      createdCategoryIds.push(category.id);
+
+      const renamed = await renameCategory(prisma, category.id, {
+        name: `Renamed Name ${suffix}`,
+      });
+
+      expect(renamed.name).toBe(`Renamed Name ${suffix}`);
+      expect(renamed.slug).toBe(category.slug);
+
+      const saved = await prisma.category.findUniqueOrThrow({ where: { id: category.id } });
+      expect(saved.slug).toBe(category.slug);
+      expect(saved.name).toBe(`Renamed Name ${suffix}`);
+    });
+
+    it("rejects a name colliding case-insensitively with another category, writing nothing", async () => {
+      const suffix = randomUUID();
+      const existing = await prisma.category.create({
+        data: { name: `bijou-${suffix}`, slug: `bijou-${suffix}` },
+      });
+      createdCategoryIds.push(existing.id);
+      const target = await prisma.category.create({
+        data: { name: `Accesorios ${suffix}`, slug: `accesorios-${suffix}` },
+      });
+      createdCategoryIds.push(target.id);
+
+      await expect(
+        renameCategory(prisma, target.id, { name: `BIJOU-${suffix}` }),
+      ).rejects.toThrow(DuplicateCategoryNameError);
+
+      const unchanged = await prisma.category.findUniqueOrThrow({ where: { id: target.id } });
+      expect(unchanged.name).toBe(`Accesorios ${suffix}`);
+    });
+
+    it("allows a case-only self-rename on the same row", async () => {
+      const suffix = randomUUID();
+      const category = await prisma.category.create({
+        data: { name: `Bijou ${suffix}`, slug: `bijou-self-${suffix}` },
+      });
+      createdCategoryIds.push(category.id);
+
+      const renamed = await renameCategory(prisma, category.id, {
+        name: `bijou ${suffix}`,
+      });
+
+      expect(renamed.name).toBe(`bijou ${suffix}`);
+    });
+
+    it("does not falsely collide when the new name contains a % wildcard character", async () => {
+      const suffix = randomUUID();
+      const unrelated = await prisma.category.create({
+        data: { name: `Zapatos Cerrados ${suffix}`, slug: `zapatos-cerrados-${suffix}` },
+      });
+      createdCategoryIds.push(unrelated.id);
+      const target = await prisma.category.create({
+        data: { name: `Target ${suffix}`, slug: `target-percent-${suffix}` },
+      });
+      createdCategoryIds.push(target.id);
+
+      const renamed = await renameCategory(prisma, target.id, {
+        name: `Zapatos%${suffix}`,
+      });
+
+      expect(renamed.name).toBe(`Zapatos%${suffix}`);
+    });
+
+    it("throws CategoryNotFoundError for an unknown id", async () => {
+      await expect(
+        renameCategory(prisma, `does-not-exist-${randomUUID()}`, { name: "No Existe" }),
+      ).rejects.toThrow(CategoryNotFoundError);
+    });
+  });
+
+  describe("deleteCategory", () => {
+    it("removes an empty category", async () => {
+      const suffix = randomUUID();
+      const category = await prisma.category.create({
+        data: { name: `Borrar ${suffix}`, slug: `borrar-${suffix}` },
+      });
+
+      await deleteCategory(prisma, category.id);
+
+      const found = await prisma.category.findUnique({ where: { id: category.id } });
+      expect(found).toBeNull();
+    });
+
+    it("throws CategoryHasProductsError with the exact productCount and deletes nothing when products reference it", async () => {
+      const suffix = randomUUID();
+      const category = await prisma.category.create({
+        data: { name: `Con Productos ${suffix}`, slug: `con-productos-${suffix}` },
+      });
+      createdCategoryIds.push(category.id);
+      const product = await createProduct(prisma, {
+        name: `Producto Con Categoria ${suffix}`,
+        slug: `producto-con-categoria-${suffix}`,
+        price: 15000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Unico", sku: `PCC-${suffix}`, onHand: 1 }],
+      });
+      createdProductIds.push(product.id);
+
+      try {
+        await deleteCategory(prisma, category.id);
+        expect.unreachable("expected deleteCategory to throw");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CategoryHasProductsError);
+        expect((error as CategoryHasProductsError).categoryId).toBe(category.id);
+        expect((error as CategoryHasProductsError).productCount).toBe(1);
+      }
+
+      const stillThere = await prisma.category.findUnique({ where: { id: category.id } });
+      expect(stillThere).not.toBeNull();
+    });
+
+    it("throws CategoryNotFoundError for an unknown id", async () => {
+      await expect(
+        deleteCategory(prisma, `does-not-exist-${randomUUID()}`),
+      ).rejects.toThrow(CategoryNotFoundError);
     });
   });
 });
