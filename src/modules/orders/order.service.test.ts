@@ -7,6 +7,7 @@ import { createProduct } from "@/modules/catalog/product.service";
 import { hold, OutOfStockError } from "@/modules/inventory/stock.service";
 import { nextOpenBusinessDayClose } from "@/lib/business-days";
 import {
+  cancelOrder,
   confirmPaymentApproved,
   confirmPaymentPending,
   confirmPaymentRejectedOrCancelled,
@@ -592,6 +593,100 @@ describe("order.service — createPendingOrder (integration, real Postgres)", ()
 
     it("throws OrderNotFoundError for an unknown orderId", async () => {
       await expect(markPickedUp(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
+        OrderNotFoundError,
+      );
+    });
+  });
+
+  describe("cancelOrder — staff cancellation of PENDING_PAYMENT/RESERVED (proposal 2026-08-18-admin-cancelar-pedido)", () => {
+    async function makePendingOrder(onHand: number, qty = 1) {
+      const { variant } = await makeProductWithVariant(onHand, 20000);
+      const order = await createPendingOrder(prisma, {
+        ...guestContact(),
+        method: "MP",
+        items: [{ variantId: variant.id, qty }],
+      });
+      createdOrderIds.push(order.id);
+      return { variant, order };
+    }
+
+    async function makeTwoLineOrder(method: "MP" | "PICKUP_CASH") {
+      const { variant: variantA } = await makeProductWithVariant(5, 20000);
+      const { variant: variantB } = await makeProductWithVariant(3, 15000);
+      const order = await createPendingOrder(prisma, {
+        ...guestContact(),
+        method,
+        items: [
+          { variantId: variantA.id, qty: 2 },
+          { variantId: variantB.id, qty: 1 },
+        ],
+      });
+      createdOrderIds.push(order.id);
+      return { variantA, variantB, order };
+    }
+
+    it("PENDING_PAYMENT -> CANCELLED: releases held stock, clears expiresAt, and writes a StockMovement(RELEASE) row", async () => {
+      const { variant, order } = await makePendingOrder(4, 2);
+
+      const result = await cancelOrder(prisma, order.id);
+
+      expect(result.status).toBe("CANCELLED");
+      expect(result.expiresAt).toBeNull();
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.onHand).toBe(4);
+      expect(updatedVariant.held).toBe(0);
+      const movements = await prisma.stockMovement.findMany({
+        where: { orderId: order.id, variantId: variant.id, reason: "RELEASE" },
+      });
+      expect(movements).toHaveLength(1);
+      expect(movements[0]?.delta).toBe(-2);
+    });
+
+    it("RESERVED -> CANCELLED: releases every line's held stock and writes one StockMovement(RELEASE) row per item (multi-line order)", async () => {
+      const { variantA, variantB, order } = await makeTwoLineOrder("PICKUP_CASH");
+
+      const result = await cancelOrder(prisma, order.id);
+
+      expect(result.status).toBe("CANCELLED");
+      expect(result.expiresAt).toBeNull();
+      const updatedA = await prisma.variant.findUniqueOrThrow({ where: { id: variantA.id } });
+      const updatedB = await prisma.variant.findUniqueOrThrow({ where: { id: variantB.id } });
+      expect(updatedA.onHand).toBe(5);
+      expect(updatedA.held).toBe(0);
+      expect(updatedB.onHand).toBe(3);
+      expect(updatedB.held).toBe(0);
+      const movementsA = await prisma.stockMovement.findMany({
+        where: { orderId: order.id, variantId: variantA.id, reason: "RELEASE" },
+      });
+      const movementsB = await prisma.stockMovement.findMany({
+        where: { orderId: order.id, variantId: variantB.id, reason: "RELEASE" },
+      });
+      expect(movementsA).toHaveLength(1);
+      expect(movementsB).toHaveLength(1);
+    });
+
+    it.each([
+      ["PAID" as const],
+      ["PICKED_UP" as const],
+      ["EXPIRED" as const],
+      ["CANCELLED" as const],
+    ])("rejects cancelling an order already in %s status, and mutates nothing", async (status) => {
+      const { variant, order } = await makePendingOrder(3, 1);
+      await prisma.order.update({ where: { id: order.id }, data: { status } });
+
+      await expect(cancelOrder(prisma, order.id)).rejects.toThrow(
+        InvalidOrderStatusTransitionError,
+      );
+
+      const unchangedOrder = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(unchangedOrder.status).toBe(status);
+      const unchangedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(unchangedVariant.onHand).toBe(3);
+      expect(unchangedVariant.held).toBe(1);
+    });
+
+    it("throws OrderNotFoundError for an unknown orderId", async () => {
+      await expect(cancelOrder(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
         OrderNotFoundError,
       );
     });
