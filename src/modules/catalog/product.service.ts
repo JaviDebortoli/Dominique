@@ -16,6 +16,116 @@ import type {
   Variant,
 } from "@/generated/prisma/client";
 
+// Product/variant edit+delete path — admin-productos-edicion change
+// (design.md F1-F9). Mirrors category.service.ts's error-class shape: every
+// error carries the id(s) it failed on, `this.name` is the class name, and
+// the route owns all Spanish copy (E4).
+export class ProductNotFoundError extends Error {
+  constructor(public readonly productId: string) {
+    super(`Product ${productId} not found.`);
+    this.name = "ProductNotFoundError";
+  }
+}
+
+/** F1 — `categoryId` in the PATCH payload no longer resolves to a category. */
+export class ProductCategoryNotFoundError extends Error {
+  constructor(public readonly categoryId: string) {
+    super(`Category ${categoryId} not found.`);
+    this.name = "ProductCategoryNotFoundError";
+  }
+}
+
+/** F2/F3 — a variant has onHand > 0; carries the SKUs to zero out in
+ * /admin/caja. Pre-checked because `createProduct` writes initial stock
+ * directly with no StockMovement row, so RESTRICT cannot see it. */
+export class ProductHasStockError extends Error {
+  constructor(
+    public readonly productId: string,
+    public readonly skus: string[],
+  ) {
+    super(`Product ${productId} has stock on hand for: ${skus.join(", ")}.`);
+    this.name = "ProductHasStockError";
+  }
+}
+
+/** F2/F3 — DB-adjudicated via P2003; counts explain, never gate. */
+export class ProductHasHistoryError extends Error {
+  constructor(
+    public readonly productId: string,
+    public readonly orderItemCount: number,
+    public readonly stockMovementCount: number,
+  ) {
+    super(
+      `Product ${productId} has ${orderItemCount} order item(s) and ${stockMovementCount} stock movement(s).`,
+    );
+    this.name = "ProductHasHistoryError";
+  }
+}
+
+export class VariantNotFoundError extends Error {
+  constructor(public readonly variantId: string) {
+    super(`Variant ${variantId} not found.`);
+    this.name = "VariantNotFoundError";
+  }
+}
+
+/** F4 — unconditional: a Product must keep >= 1 Variant. Checked first
+ * because its remedy ("delete the product instead") differs in kind from
+ * every other blocking cause. */
+export class LastVariantError extends Error {
+  constructor(
+    public readonly productId: string,
+    public readonly variantId: string,
+  ) {
+    super(`Variant ${variantId} is the last remaining variant of product ${productId}.`);
+    this.name = "LastVariantError";
+  }
+}
+
+export class VariantHasStockError extends Error {
+  constructor(
+    public readonly variantId: string,
+    public readonly sku: string,
+    public readonly onHand: number,
+  ) {
+    super(`Variant ${variantId} (${sku}) has ${onHand} unit(s) on hand.`);
+    this.name = "VariantHasStockError";
+  }
+}
+
+export class VariantHasHistoryError extends Error {
+  constructor(
+    public readonly variantId: string,
+    public readonly orderItemCount: number,
+    public readonly stockMovementCount: number,
+  ) {
+    super(
+      `Variant ${variantId} has ${orderItemCount} order item(s) and ${stockMovementCount} stock movement(s).`,
+    );
+    this.name = "VariantHasHistoryError";
+  }
+}
+
+export class DuplicateSkuError extends Error {
+  constructor(public readonly sku: string) {
+    super(`A variant with sku "${sku}" already exists.`);
+    this.name = "DuplicateSkuError";
+  }
+}
+
+/** F6 — size/color are writable fields, so the rejection is a conflict with
+ * the resource's current state (409), not a malformed request (400): the
+ * same PATCH succeeds against a variant with no order history. */
+export class VariantAttributesImmutableError extends Error {
+  constructor(
+    public readonly variantId: string,
+    public readonly orderItemCount: number,
+  ) {
+    super(`Variant ${variantId} has ${orderItemCount} order item(s); size/color are frozen.`);
+    this.name = "VariantAttributesImmutableError";
+  }
+}
+
 export class DuplicateVariantError extends Error {
   constructor(
     public readonly productId: string,
@@ -209,6 +319,182 @@ export async function getProductBySlug(
       images: { orderBy: { position: "asc" } },
     },
   });
+}
+
+// No `slug`, `onHand`, `held`, or `priceOverride` field — structurally
+// unwritable (F7): slug is immutable (E5's rule generalized), stock fields
+// are owned exclusively by stock.service.ts.
+export interface UpdateProductInput {
+  name?: string;
+  description?: string | null;
+  price?: number;
+  categoryId?: string;
+}
+
+/**
+ * Updates a product's editable fields. `slug` is never written. Relies on
+ * the DB to adjudicate both failure modes (design.md F1, mirrors E3):
+ * P2025 (no such product) -> ProductNotFoundError, P2003 (categoryId FK)
+ * -> ProductCategoryNotFoundError. No pre-check — a bad categoryId can only
+ * mean a stale admin tab (the picker is DB-seeded), so the round-trip a
+ * pre-check would cost on every happy-path edit buys nothing.
+ */
+export async function updateProduct(
+  prisma: PrismaClient,
+  id: string,
+  input: UpdateProductInput,
+): Promise<Product> {
+  try {
+    return await prisma.product.update({
+      where: { id },
+      data: input,
+    });
+  } catch (error) {
+    if (error instanceof Error && "code" in error) {
+      const code = (error as { code?: string }).code;
+      if (code === "P2025") {
+        throw new ProductNotFoundError(id);
+      }
+      if (code === "P2003") {
+        throw new ProductCategoryNotFoundError(input.categoryId ?? "");
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Hard-deletes a product, cascading its Variants and ProductImages
+ * (design.md F2/F3). `onHand > 0` is pre-checked — it is not a foreign key,
+ * so no catch clause can ever see it (see design.md Technical Approach).
+ * History (OrderItem/StockMovement) stays DB-adjudicated via P2003, exactly
+ * as deleteCategory does (E3): attempt the delete, count on failure only to
+ * explain the block, never to gate it.
+ */
+export async function deleteProduct(prisma: PrismaClient, id: string): Promise<void> {
+  const product = await prisma.product.findUnique({
+    where: { id },
+    select: { variants: { select: { id: true, sku: true, onHand: true } } },
+  });
+  if (!product) {
+    throw new ProductNotFoundError(id);
+  }
+
+  const stockedSkus = product.variants.filter((v) => v.onHand > 0).map((v) => v.sku);
+  if (stockedSkus.length > 0) {
+    throw new ProductHasStockError(id, stockedSkus);
+  }
+
+  try {
+    await prisma.product.delete({ where: { id } });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "P2003") {
+      const variantIds = product.variants.map((v) => v.id);
+      const [orderItemCount, stockMovementCount] = await Promise.all([
+        prisma.orderItem.count({ where: { variantId: { in: variantIds } } }),
+        prisma.stockMovement.count({ where: { variantId: { in: variantIds } } }),
+      ]);
+      throw new ProductHasHistoryError(id, orderItemCount, stockMovementCount);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Deletes a variant, blocked by last-variant-standing, remaining stock, or
+ * order/stock history (design.md F4). Order: last-variant (unconditional,
+ * different remedy in kind) -> onHand > 0 (not a foreign key, pre-checked)
+ * -> attempt the delete, catch P2003 for history. Deliberately **no**
+ * interactive `$transaction`: every writer that can raise `onHand` after
+ * creation also writes a StockMovement, whose RESTRICT independently blocks
+ * the delete — the onHand>0-with-no-movement state can only be left, never
+ * entered, so there is no live TOCTOU window for this sequence to close.
+ */
+export async function deleteVariant(prisma: PrismaClient, variantId: string): Promise<void> {
+  const variant = await prisma.variant.findUnique({ where: { id: variantId } });
+  if (!variant) {
+    throw new VariantNotFoundError(variantId);
+  }
+
+  const siblingCount = await prisma.variant.count({ where: { productId: variant.productId } });
+  if (siblingCount === 1) {
+    throw new LastVariantError(variant.productId, variantId);
+  }
+
+  if (variant.onHand > 0) {
+    throw new VariantHasStockError(variantId, variant.sku, variant.onHand);
+  }
+
+  try {
+    await prisma.variant.delete({ where: { id: variantId } });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "P2003") {
+      const [orderItemCount, stockMovementCount] = await Promise.all([
+        prisma.orderItem.count({ where: { variantId } }),
+        prisma.stockMovement.count({ where: { variantId } }),
+      ]);
+      throw new VariantHasHistoryError(variantId, orderItemCount, stockMovementCount);
+    }
+    throw error;
+  }
+}
+
+// No `onHand`/`held` field — structurally unwritable (F7: stock fields are
+// owned exclusively by stock.service.ts).
+export interface UpdateVariantInput {
+  sku?: string;
+  size?: string;
+  color?: string;
+}
+
+/**
+ * Updates a variant's `sku`, `size`, and/or `color` (design.md F5/F6).
+ * `size`/`color` are rejected once the variant has any OrderItem row (F6,
+ * 409-shaped: these ARE writable fields, just conflicted by current state).
+ * The size+color pair is resolved (patch merged over current values,
+ * mirroring `addVariant`'s `findFirst`) and pre-checked against every
+ * sibling before the write, so a `P2002` surviving that check is
+ * unambiguously the `sku` constraint (F5, see design.md Open Questions).
+ */
+export async function updateVariant(
+  prisma: PrismaClient,
+  variantId: string,
+  input: UpdateVariantInput,
+): Promise<Variant> {
+  const variant = await prisma.variant.findUnique({ where: { id: variantId } });
+  if (!variant) {
+    throw new VariantNotFoundError(variantId);
+  }
+
+  if (input.size !== undefined || input.color !== undefined) {
+    const orderItemCount = await prisma.orderItem.count({ where: { variantId } });
+    if (orderItemCount > 0) {
+      throw new VariantAttributesImmutableError(variantId, orderItemCount);
+    }
+
+    const resolvedSize = input.size ?? variant.size;
+    const resolvedColor = input.color ?? variant.color;
+    const collision = await prisma.variant.findFirst({
+      where: {
+        productId: variant.productId,
+        size: resolvedSize,
+        color: resolvedColor,
+        NOT: { id: variantId },
+      },
+    });
+    if (collision) {
+      throw new DuplicateVariantError(variant.productId, resolvedSize, resolvedColor);
+    }
+  }
+
+  try {
+    return await prisma.variant.update({ where: { id: variantId }, data: input });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "P2002") {
+      throw new DuplicateSkuError(input.sku ?? "");
+    }
+    throw error;
+  }
 }
 
 export type AdminProductRow = Product & {
