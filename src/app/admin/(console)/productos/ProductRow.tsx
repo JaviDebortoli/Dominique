@@ -23,6 +23,7 @@ import { useState } from "react";
 import { formatPriceARS } from "@/lib/format-price";
 import type { Category, ProductImage, Variant } from "@/generated/prisma/client";
 import { AddVariantForm } from "./AddVariantForm";
+import { ProductImages } from "./ProductImages";
 import { VariantRow } from "./VariantRow";
 
 interface ProductRowProduct {
@@ -279,6 +280,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
           ))
         : null}
       {expanded ? <AddVariantForm productId={product.id} /> : null}
+      {expanded ? <ProductImages productId={product.id} images={product.images} /> : null}
     </>
   );
 }
