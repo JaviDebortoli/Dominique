@@ -17,6 +17,7 @@ import {
   markPickedUp,
   OrderNotFoundError,
   StockUnavailableError,
+  TooManyOpenReservationsError,
 } from "./order.service";
 
 // Integration tests against the real local Postgres (design.md Testing
@@ -63,8 +64,20 @@ describe("order.service — createPendingOrder (integration, real Postgres)", ()
     return { product, variant: product.variants[0] };
   }
 
+  // A fresh email+phone per call (not a fixed constant) — necessary since
+  // 2026-08-21-checkout-antiabuso's per-identity reservation cap (tasks.md
+  // 3.3) counts open RESERVED PICKUP_CASH orders by email+phone across the
+  // whole table: a shared constant identity across this file's many
+  // PICKUP_CASH-creating tests would let them count against each other's
+  // cap and fail unpredictably depending on run order. No existing
+  // assertion in this file checks a specific email/phone value.
   function guestContact() {
-    return { buyerName: "Guest Buyer", phone: "3815551234", email: "guest@example.com" };
+    const suffix = randomUUID();
+    return {
+      buyerName: "Guest Buyer",
+      phone: `381555${suffix.replace(/\D/g, "").slice(0, 4).padEnd(4, "0")}`,
+      email: `guest-${suffix}@example.com`,
+    };
   }
 
   describe("D5 — creates Order(PENDING_PAYMENT, expiresAt=+30min) and holds every line in one tx", () => {
@@ -509,6 +522,164 @@ describe("order.service — createPendingOrder (integration, real Postgres)", ()
       const expiresInMinutes = (order.expiresAt!.getTime() - before) / 60_000;
       expect(expiresInMinutes).toBeGreaterThan(29);
       expect(expiresInMinutes).toBeLessThan(31);
+    });
+  });
+
+  // 2026-08-21-checkout-antiabuso — tasks.md 3.1/3.2, design.md "Cap
+  // counted inside the hold() transaction, soft under concurrency".
+  // specs/cart-checkout/spec.md "Per-Identity Concurrent Reservation Cap".
+  // Mirrors the markPickedUp/cancelOrder blocks' structure below.
+  describe("createPendingOrder — per-identity PICKUP_CASH reservation cap (tasks.md 3.1/3.2)", () => {
+    function identity(suffix: string) {
+      return { buyerName: "Cliente Cap", phone: `3815 550 ${suffix}`, email: `cap-${suffix}@example.com` };
+    }
+
+    async function makeReservation(contact: ReturnType<typeof identity>, onHand = 5) {
+      const { variant } = await makeProductWithVariant(onHand, 10000);
+      const order = await createPendingOrder(prisma, {
+        ...contact,
+        method: "PICKUP_CASH",
+        items: [{ variantId: variant.id, qty: 1 }],
+      });
+      createdOrderIds.push(order.id);
+      return { variant, order };
+    }
+
+    it("4th open reservation for the same identity throws TooManyOpenReservationsError, held unchanged for that attempt", async () => {
+      const contact = identity(randomUUID());
+      await makeReservation(contact);
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const { variant: fourthVariant } = await makeProductWithVariant(5, 10000);
+      await expect(
+        createPendingOrder(prisma, {
+          ...contact,
+          method: "PICKUP_CASH",
+          items: [{ variantId: fourthVariant.id, qty: 1 }],
+        }),
+      ).rejects.toThrow(TooManyOpenReservationsError);
+
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: fourthVariant.id } });
+      expect(updatedVariant.held).toBe(0);
+      const ordersForFourth = await prisma.orderItem.findMany({ where: { variantId: fourthVariant.id } });
+      expect(ordersForFourth).toHaveLength(0);
+    });
+
+    it("3rd open reservation for the same identity succeeds", async () => {
+      const contact = identity(randomUUID());
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const { variant, order } = await makeReservation(contact);
+
+      expect(order.status).toBe("RESERVED");
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(1);
+    });
+
+    it("triangulation: method:'MP' skips the count entirely even with 3+ open PICKUP_CASH reservations for the same identity", async () => {
+      const contact = identity(randomUUID());
+      await makeReservation(contact);
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const { variant } = await makeProductWithVariant(5, 10000);
+      const order = await createPendingOrder(prisma, {
+        ...contact,
+        method: "MP",
+        items: [{ variantId: variant.id, qty: 1 }],
+      });
+      createdOrderIds.push(order.id);
+
+      expect(order.status).toBe("PENDING_PAYMENT");
+    });
+
+    it("triangulation: an EXPIRED-by-clock PICKUP_CASH reservation (expiresAt in the past) does not count against the cap", async () => {
+      const contact = identity(randomUUID());
+      const { order: firstOrder } = await makeReservation(contact);
+      await prisma.order.update({
+        where: { id: firstOrder.id },
+        data: { expiresAt: new Date(Date.now() - 60_000) },
+      });
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      // Only 2 reservations have a still-future expiresAt (the sweep hasn't
+      // collected the first one yet, but it's already past its window) — a
+      // 4th here is really the 3rd within-window request and must succeed.
+      const { variant, order } = await makeReservation(contact);
+
+      expect(order.status).toBe("RESERVED");
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(1);
+    });
+
+    it.each([["CANCELLED"] as const, ["PICKED_UP"] as const, ["EXPIRED"] as const])(
+      "triangulation: a %s (non-RESERVED) PICKUP_CASH order for the same identity does not count against the cap",
+      async (status) => {
+        const contact = identity(randomUUID());
+        const { order: firstOrder } = await makeReservation(contact);
+        await prisma.order.update({ where: { id: firstOrder.id }, data: { status } });
+        await makeReservation(contact);
+        await makeReservation(contact);
+
+        const { variant, order } = await makeReservation(contact);
+
+        expect(order.status).toBe("RESERVED");
+        const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+        expect(updatedVariant.held).toBe(1);
+      },
+    );
+
+    it("triangulation: an MP PENDING_PAYMENT order for the same identity does not count against the PICKUP_CASH cap", async () => {
+      const contact = identity(randomUUID());
+      const { variant: mpVariant } = await makeProductWithVariant(5, 10000);
+      const mpOrder = await createPendingOrder(prisma, {
+        ...contact,
+        method: "MP",
+        items: [{ variantId: mpVariant.id, qty: 1 }],
+      });
+      createdOrderIds.push(mpOrder.id);
+
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const { variant, order } = await makeReservation(contact);
+
+      expect(order.status).toBe("RESERVED");
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(1);
+    });
+
+    it("triangulation: same phone but a different email is a distinct identity, not counted against the first identity's cap", async () => {
+      const suffix = randomUUID();
+      const contact = identity(suffix);
+      await makeReservation(contact);
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const otherEmailContact = { ...contact, email: `other-${suffix}@example.com` };
+      const { variant, order } = await makeReservation(otherEmailContact);
+
+      expect(order.status).toBe("RESERVED");
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(1);
+    });
+
+    it("triangulation: same email but a different phone is a distinct identity, not counted against the first identity's cap", async () => {
+      const suffix = randomUUID();
+      const contact = identity(suffix);
+      await makeReservation(contact);
+      await makeReservation(contact);
+      await makeReservation(contact);
+
+      const otherPhoneContact = { ...contact, phone: `+54 9 385 999${suffix.replace(/\D/g, "").slice(0, 4)}` };
+      const { variant, order } = await makeReservation(otherPhoneContact);
+
+      expect(order.status).toBe("RESERVED");
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(1);
     });
   });
 

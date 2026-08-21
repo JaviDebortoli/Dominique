@@ -156,6 +156,89 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
     expect(body.error).toBe("invalid_request");
   });
 
+  // tasks.md 1.1 — contact-format plausibility (design.md "Discriminated
+  // validation result" decision). Empty phone/email are already rejected by
+  // the existing shape check above (isNonEmptyString) and stay
+  // `invalid_request` — these cases cover non-empty-but-implausible values,
+  // which is what the new `isPlausibleEmail`/`isPlausiblePhone` checks add.
+  describe("Contact format validation (tasks.md 1.1, specs/cart-checkout 'Checkout Contact Format Validation')", () => {
+    it("rejects an obviously invalid email with 400 invalid_contact, field email, and creates no order/hold", async () => {
+      const variant = await makeVariant(2);
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Email Malo",
+          phone: "3815550020",
+          email: "x",
+          method: "MP",
+          items: [{ variantId: variant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toBe("invalid_contact");
+      expect(body.field).toBe("email");
+      expect(typeof body.message).toBe("string");
+
+      const ordersForVariant = await prisma.orderItem.findMany({ where: { variantId: variant.id } });
+      expect(ordersForVariant).toHaveLength(0);
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(0);
+    });
+
+    it("rejects an obviously invalid phone with 400 invalid_contact, field phone, and creates no order/hold", async () => {
+      const variant = await makeVariant(2);
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Telefono Malo",
+          phone: "x",
+          email: "telmalo@example.com",
+          method: "MP",
+          items: [{ variantId: variant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toBe("invalid_contact");
+      expect(body.field).toBe("phone");
+      expect(typeof body.message).toBe("string");
+
+      const ordersForVariant = await prisma.orderItem.findMany({ where: { variantId: variant.id } });
+      expect(ordersForVariant).toHaveLength(0);
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(0);
+    });
+
+    it.each([
+      ["no leading 0, no area code", "385 4211234"],
+      ["written with 15", "11 15 2345 6789"],
+      ["with area code and leading 0", "0385 421-1234"],
+      ["E.164-style with country code", "+54 9 385 4211234"],
+    ])(
+      "triangulation: accepts a real, inconsistently formatted AR phone (%s) — PICKUP_CASH to avoid the MP mock",
+      async (_label, phone) => {
+        const variant = await makeVariant(2);
+
+        const response = await POST(
+          postRequest({
+            buyerName: "Cliente Telefono Real",
+            phone,
+            email: "telreal@example.com",
+            method: "PICKUP_CASH",
+            items: [{ variantId: variant.id, qty: 1 }],
+          }),
+        );
+
+        expect(response.status).toBe(201);
+        const body = await response.json();
+        createdOrderIds.push(body.orderId);
+      },
+    );
+  });
+
   it("rejects an empty cart with 400", async () => {
     const response = await POST(
       postRequest({
@@ -170,6 +253,53 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toBe("empty_cart");
+  });
+
+  // 2026-08-21-checkout-antiabuso — tasks.md 3.4, design.md
+  // "TooManyOpenReservationsError carries counts, not identity; route
+  // composes 409 copy". specs/cart-checkout "Per-Identity Concurrent
+  // Reservation Cap".
+  describe("Per-identity PICKUP_CASH reservation cap — 409 (tasks.md 3.4)", () => {
+    it("rejects the 4th open PICKUP_CASH reservation for the same identity with 409 and the exact Spanish copy, creating no order row and no hold", async () => {
+      const suffix = randomUUID();
+      const contact = {
+        buyerName: "Cliente Cap Ruta",
+        phone: `3815 551 ${suffix.replace(/\D/g, "").slice(0, 4).padEnd(4, "0")}`,
+        email: `cap-ruta-${suffix}@example.com`,
+      };
+
+      for (let i = 0; i < 3; i++) {
+        const variant = await makeVariant(2);
+        const response = await POST(
+          postRequest({ ...contact, method: "PICKUP_CASH", items: [{ variantId: variant.id, qty: 1 }] }),
+        );
+        expect(response.status).toBe(201);
+        const body = await response.json();
+        createdOrderIds.push(body.orderId);
+      }
+
+      const fourthVariant = await makeVariant(2);
+      const response = await POST(
+        postRequest({
+          ...contact,
+          method: "PICKUP_CASH",
+          items: [{ variantId: fourthVariant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error).toBe("too_many_open_reservations");
+      expect(body.message).toBe(
+        "Ya tenés 3 reservas para retirar en el local sin confirmar. " +
+          "Pasá a retirarlas o escribinos para cancelar alguna antes de hacer una nueva.",
+      );
+
+      const ordersForFourth = await prisma.orderItem.findMany({ where: { variantId: fourthVariant.id } });
+      expect(ordersForFourth).toHaveLength(0);
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: fourthVariant.id } });
+      expect(updatedVariant.held).toBe(0);
+    });
   });
 
   // tasks.md 5.1 — preference created for the PENDING_PAYMENT order, 303
