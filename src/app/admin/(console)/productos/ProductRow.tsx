@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { formatPriceARS } from "@/lib/format-price";
 import type { Category, ProductImage, Variant } from "@/generated/prisma/client";
+import { AddVariantForm } from "./AddVariantForm";
 import { VariantRow } from "./VariantRow";
 
 interface ProductRowProduct {
@@ -277,6 +278,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
             <VariantRow key={variant.id} productId={product.id} variant={variant} />
           ))
         : null}
+      {expanded ? <AddVariantForm productId={product.id} /> : null}
     </>
   );
 }

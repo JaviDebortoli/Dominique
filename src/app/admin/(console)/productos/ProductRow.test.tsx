@@ -215,6 +215,21 @@ describe("ProductRow", () => {
     expect(screen.queryByText("VL-BEI-L")).not.toBeInTheDocument();
   });
 
+  it("mounts AddVariantForm only when the Variantes cell has been toggled expanded (design.md G9)", async () => {
+    const user = userEvent.setup();
+    renderRow();
+
+    expect(screen.queryByRole("button", { name: "Agregar" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+
+    expect(screen.getByRole("button", { name: "Agregar" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+
+    expect(screen.queryByRole("button", { name: "Agregar" })).not.toBeInTheDocument();
+  });
+
   it("sends no DELETE request when confirm() returns false", async () => {
     const user = userEvent.setup();
     (window.confirm as ReturnType<typeof vi.fn>).mockReturnValue(false);
