@@ -40,9 +40,9 @@ The admin console MUST require authentication; unauthenticated requests MUST be 
 
 ### Requirement: Product and Variant Management
 
-Staff MUST be able to create, rename, and delete categories; create, edit, and delete products and variants; and create stock, without engineering assistance. Category creation MUST validate `slug` and reject a duplicate. `PATCH /api/admin/categories/[id]` MUST update `name` only; `slug` MUST stay immutable — a payload containing a `slug` key MUST be rejected whole with `400 Bad Request`, never silently stripped. A `name`-only payload MUST return `409 Conflict` on a case-insensitive collision. `DELETE /api/admin/categories/[id]` MUST succeed when the category has zero products, else be blocked with a typed error stating the exact assigned-product count. `PATCH /api/admin/products/[id]` MUST update `name`, `description`, `price`, and `categoryId` only; `slug` follows the same immutable, reject-the-whole-request rule as categories. `DELETE /api/admin/products/[id]` MUST hard-delete the product and its variants/images, and MUST be blocked with a cause-specific typed error when any variant has `OrderItem`/`StockMovement` history, or (a distinct message) when any variant has `onHand > 0`. `PATCH .../variants/[variantId]` MUST update `sku` with a global-uniqueness check (`409 Conflict` on collision); `size` and `color` MUST be rejected with a typed error once the variant has any `OrderItem` row, while `sku` stays editable on that same variant. `DELETE .../variants/[variantId]` MUST succeed only when the variant has no order/stock history, `onHand === 0`, and is not the product's last remaining variant; each of the three blocking causes MUST return a distinct message. `PATCH`/`DELETE` on a non-existent category, product, or variant id MUST return `404 Not Found`. Neither product nor variant edit surfaces MUST expose `onHand` or `held` as editable fields. Deactivation is NOT delivered: `Category` has no `isActive` field.
+Staff MUST be able to create, rename, and delete categories; create, edit, delete, and extend products and variants — including adding a new variant or image after creation — and create stock, without engineering assistance. Category creation MUST validate `slug` and reject a duplicate. `PATCH /api/admin/categories/[id]` MUST update `name` only; `slug` MUST stay immutable — a payload containing a `slug` key MUST be rejected whole with `400 Bad Request`, never silently stripped. A `name`-only payload MUST return `409 Conflict` on a case-insensitive collision. `DELETE /api/admin/categories/[id]` MUST succeed when the category has zero products, else be blocked with a typed error stating the exact assigned-product count. `PATCH /api/admin/products/[id]` MUST update `name`, `description`, `price`, and `categoryId` only; `slug` follows the same immutable, reject-the-whole-request rule as categories. `DELETE /api/admin/products/[id]` MUST hard-delete the product and its variants/images, and MUST be blocked with a cause-specific typed error when any variant has `OrderItem`/`StockMovement` history, or (a distinct message) when any variant has `onHand > 0`. `PATCH .../variants/[variantId]` MUST update `sku` with a global-uniqueness check (`409 Conflict` on collision); `size` and `color` MUST be rejected with a typed error once the variant has any `OrderItem` row, while `sku` stays editable on that same variant. `DELETE .../variants/[variantId]` MUST succeed only when the variant has no order/stock history, `onHand === 0`, and is not the product's last remaining variant; each of the three blocking causes MUST return a distinct message. `POST /api/admin/products/[id]/variants` MUST add a new variant to an existing product by wrapping the existing `addVariant()`, reusing its existing duplicate size+color check (`409 Conflict`, no new guard); a new variant MUST always start at `onHand: 0` and the add-variant form MUST expose no stock input — `/admin/caja` stays the sole stock entry point. `POST /api/admin/products/[id]/images` MUST attach an already-uploaded image (`url` required, `altText`/`position` optional) to an existing product, and MUST reject a request that would exceed 5 images per product with a typed `TooManyImagesError`, before any additional write. `DELETE /api/admin/products/[id]/images/[imageId]` MUST remove the image; deleting a product's last remaining image MUST be freely allowed — zero images is already a valid product state. `PATCH`/`DELETE` on a non-existent category, product, or variant id MUST return `404 Not Found`. Neither product nor variant edit surfaces, nor the add-variant form, MUST expose `onHand` or `held` as editable fields; `onHand`/`held` on an existing variant stay owned solely by `/admin/caja` and `stock.service.ts`. Deactivation is NOT delivered: `Category` has no `isActive` field.
 
-(Previously: covered category creation/rename/delete and product/variant creation only; this adds product edit, product delete, variant edit, variant delete, and the blocking rules for history, stock, last-variant-standing, and attribute immutability.)
+(Previously: covered category creation/rename/delete and product/variant creation/edit/delete only; this adds add-variant via the existing `addVariant()` duplicate size+color check, add-image with a 5-image cap enforced by a new `TooManyImagesError`, and delete-image including the freely-allowed last-image case.)
 
 #### Scenario: Owner adds a product unaided
 
@@ -204,6 +204,46 @@ Staff MUST be able to create, rename, and delete categories; create, edit, and d
 - GIVEN no product or variant exists with the given id
 - WHEN the owner calls `PATCH` or `DELETE` on `/api/admin/products/[id]` or its variants sub-route
 - THEN the system MUST respond `404 Not Found` and MUST NOT mutate any row
+
+#### Scenario: Owner adds a variant to an existing product
+
+- GIVEN a product exists with one variant `size: "M", color: "Beige"`
+- WHEN the owner submits `POST /api/admin/products/[id]/variants` with `{"size": "L", "color": "Beige", "sku": "VL-BEI-L"}` and no stock field
+- THEN a new variant SHALL be created with `onHand: 0`
+- AND the product SHALL now list both variants
+
+#### Scenario: Adding a duplicate size+color variant is rejected
+
+- GIVEN a product already has a variant with `size: "M", color: "Beige"`
+- WHEN the owner submits `POST /api/admin/products/[id]/variants` with the same `size` and `color`
+- THEN the system MUST respond with `addVariant()`'s existing typed duplicate error and MUST NOT create a new variant
+
+#### Scenario: Owner adds an image to an existing product
+
+- GIVEN a product exists and the owner has an image file
+- WHEN the owner uploads the file via `POST /api/admin/upload` and then submits the returned `url` to `POST /api/admin/products/[id]/images`
+- THEN the image SHALL be attached to the product
+- AND it SHALL appear in the storefront gallery
+
+#### Scenario: Owner deletes an image, including the last remaining one
+
+- GIVEN a product has exactly one image
+- WHEN the owner calls `DELETE /api/admin/products/[id]/images/[imageId]` for that image
+- THEN the image SHALL be removed
+- AND the product SHALL remain valid with zero images
+
+#### Scenario: Adding a 6th image is rejected
+
+- GIVEN a product already has 5 images
+- WHEN the owner submits `POST /api/admin/products/[id]/images` with a 6th image `url`
+- THEN the system MUST respond with a typed `TooManyImagesError` and MUST NOT attach the image
+
+#### Scenario: Unauthenticated mutation on the new variant/image routes
+
+- GIVEN a user has no valid session
+- WHEN they call `POST` on `/api/admin/products/[id]/variants` or `/api/admin/products/[id]/images`, or `DELETE` on `/api/admin/products/[id]/images/[imageId]`
+- THEN the system MUST respond `401 Unauthorized` as JSON, not a redirect
+- AND MUST NOT create or delete any variant or image
 
 ### Requirement: Order Status Management
 
