@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import {
+  addImage,
   addVariant,
   createProduct,
+  deleteImage,
   deleteProduct,
   deleteVariant,
   DuplicateSkuError,
@@ -16,7 +18,9 @@ import {
   ProductCategoryNotFoundError,
   ProductHasHistoryError,
   ProductHasStockError,
+  ProductImageNotFoundError,
   ProductNotFoundError,
+  TooManyImagesError,
   updateProduct,
   updateVariant,
   VariantAttributesImmutableError,
@@ -674,6 +678,217 @@ describe("product.service (integration, real Postgres)", () => {
       await expect(
         updateVariant(prisma, `nope-${randomUUID()}`, { sku: "whatever" }),
       ).rejects.toThrow(VariantNotFoundError);
+    });
+  });
+
+  // tasks.md 4.1 — design.md G1/G2/G3: one read answers existence, the
+  // 5-image cap, and the default `position` (max + 1).
+  describe("addImage — Image add (G1/G2/G3)", () => {
+    it("assigns position = max + 1 on a product that already has images", async () => {
+      const category = await makeCategory("add-image-position");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Con Imagenes",
+        slug: `producto-con-imagenes-${suffix}`,
+        price: 20000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `IMG-${suffix}`, onHand: 0 }],
+        images: [
+          { url: "/uploads/img-0.jpg", position: 0 },
+          { url: "/uploads/img-1.jpg", position: 1 },
+        ],
+      });
+      createdProductIds.push(product.id);
+
+      const created = await addImage(prisma, product.id, { url: "/uploads/img-2.jpg" });
+
+      expect(created.position).toBe(2);
+      expect(created.url).toBe("/uploads/img-2.jpg");
+    });
+
+    it("assigns position = 0 on a product with no existing images", async () => {
+      const category = await makeCategory("add-image-first");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Sin Imagenes",
+        slug: `producto-sin-imagenes-${suffix}`,
+        price: 18000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `NOIMG-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+
+      const created = await addImage(prisma, product.id, { url: "/uploads/first.jpg" });
+
+      expect(created.position).toBe(0);
+    });
+
+    it("honours an explicit position instead of defaulting to max + 1", async () => {
+      const category = await makeCategory("add-image-explicit-position");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Posicion Explicita",
+        slug: `producto-posicion-explicita-${suffix}`,
+        price: 21000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `EXPLPOS-${suffix}`, onHand: 0 }],
+        images: [{ url: "/uploads/existing.jpg", position: 0 }],
+      });
+      createdProductIds.push(product.id);
+
+      const created = await addImage(prisma, product.id, {
+        url: "/uploads/explicit.jpg",
+        position: 5,
+      });
+
+      expect(created.position).toBe(5);
+    });
+
+    it("persists altText", async () => {
+      const category = await makeCategory("add-image-alt-text");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Alt Text",
+        slug: `producto-alt-text-${suffix}`,
+        price: 19000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `ALT-${suffix}`, onHand: 0 }],
+      });
+      createdProductIds.push(product.id);
+
+      const created = await addImage(prisma, product.id, {
+        url: "/uploads/alt.jpg",
+        altText: "Vestido en percha",
+      });
+
+      expect(created.altText).toBe("Vestido en percha");
+    });
+
+    it("throws ProductNotFoundError for an unknown product id", async () => {
+      await expect(
+        addImage(prisma, `nope-${randomUUID()}`, { url: "/uploads/x.jpg" }),
+      ).rejects.toThrow(ProductNotFoundError);
+    });
+
+    it("throws TooManyImagesError with currentCount: 5 and writes no row when the product already has 5 images", async () => {
+      const category = await makeCategory("add-image-cap");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Cinco Imagenes",
+        slug: `producto-cinco-imagenes-${suffix}`,
+        price: 23000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `CAP5-${suffix}`, onHand: 0 }],
+        images: [
+          { url: "/uploads/cap-0.jpg", position: 0 },
+          { url: "/uploads/cap-1.jpg", position: 1 },
+          { url: "/uploads/cap-2.jpg", position: 2 },
+          { url: "/uploads/cap-3.jpg", position: 3 },
+          { url: "/uploads/cap-4.jpg", position: 4 },
+        ],
+      });
+      createdProductIds.push(product.id);
+
+      try {
+        await addImage(prisma, product.id, { url: "/uploads/cap-5.jpg" });
+        expect.unreachable("addImage should have thrown TooManyImagesError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(TooManyImagesError);
+        const tooManyError = error as TooManyImagesError;
+        expect(tooManyError.productId).toBe(product.id);
+        expect(tooManyError.currentCount).toBe(5);
+      }
+
+      const imageCount = await prisma.productImage.count({ where: { productId: product.id } });
+      expect(imageCount).toBe(5);
+    });
+
+    it("succeeds on a product at exactly 4 images", async () => {
+      const category = await makeCategory("add-image-cap-four");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Cuatro Imagenes",
+        slug: `producto-cuatro-imagenes-${suffix}`,
+        price: 24000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `CAP4-${suffix}`, onHand: 0 }],
+        images: [
+          { url: "/uploads/cap4-0.jpg", position: 0 },
+          { url: "/uploads/cap4-1.jpg", position: 1 },
+          { url: "/uploads/cap4-2.jpg", position: 2 },
+          { url: "/uploads/cap4-3.jpg", position: 3 },
+        ],
+      });
+      createdProductIds.push(product.id);
+
+      const created = await addImage(prisma, product.id, { url: "/uploads/cap4-4.jpg" });
+
+      expect(created.position).toBe(4);
+      const imageCount = await prisma.productImage.count({ where: { productId: product.id } });
+      expect(imageCount).toBe(5);
+    });
+  });
+
+  // tasks.md 5.1 — design.md G4/E3: PK-only signature, P2025-is-the-whole-
+  // enforcement (no non-FK precondition), last image freely allowed.
+  describe("deleteImage — Image delete (G4/E3)", () => {
+    it("removes the row", async () => {
+      const category = await makeCategory("delete-image-basic");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Borrar Imagen",
+        slug: `producto-borrar-imagen-${suffix}`,
+        price: 17000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `DELIMG-${suffix}`, onHand: 0 }],
+        images: [
+          { url: "/uploads/del-0.jpg", position: 0 },
+          { url: "/uploads/del-1.jpg", position: 1 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      const [imageToDelete] = product.images;
+
+      await deleteImage(prisma, imageToDelete.id);
+
+      expect(await prisma.productImage.findUnique({ where: { id: imageToDelete.id } })).toBeNull();
+    });
+
+    it("succeeds on a product's LAST remaining image, leaving the product valid with zero images", async () => {
+      const category = await makeCategory("delete-image-last");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Ultima Imagen",
+        slug: `producto-ultima-imagen-${suffix}`,
+        price: 16500,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `LASTIMG-${suffix}`, onHand: 0 }],
+        images: [{ url: "/uploads/last.jpg", position: 0 }],
+      });
+      createdProductIds.push(product.id);
+      const [onlyImage] = product.images;
+
+      await deleteImage(prisma, onlyImage.id);
+
+      const remaining = await prisma.productImage.findMany({ where: { productId: product.id } });
+      expect(remaining).toHaveLength(0);
+      const stillExists = await prisma.product.findUnique({ where: { id: product.id } });
+      expect(stillExists).not.toBeNull();
+      expect(isProductIncomplete({ images: remaining })).toBe(true);
+    });
+
+    it("throws ProductImageNotFoundError for an unknown image id", async () => {
+      await expect(deleteImage(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
+        ProductImageNotFoundError,
+      );
     });
   });
 });

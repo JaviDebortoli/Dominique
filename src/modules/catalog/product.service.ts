@@ -139,6 +139,29 @@ export class DuplicateVariantError extends Error {
   }
 }
 
+// Admin add-image/delete-image path — admin-productos-avanzado change
+// (design.md G1-G4). Mirrors the error-class shape above.
+/** G2/G3 — a product already carries the 5-image cap; carries the count
+ * that triggered the rejection so the route can echo it in the 409 body. */
+export class TooManyImagesError extends Error {
+  constructor(
+    public readonly productId: string,
+    public readonly currentCount: number,
+  ) {
+    super(`Product ${productId} already has ${currentCount} image(s); the cap is ${MAX_PRODUCT_IMAGES}.`);
+    this.name = "TooManyImagesError";
+  }
+}
+
+/** G4 — DB-adjudicated via P2025; mirrors E3's "attempt the delete, let the
+ * DB decide" verbatim, since ProductImage has no non-FK precondition. */
+export class ProductImageNotFoundError extends Error {
+  constructor(public readonly imageId: string) {
+    super(`ProductImage ${imageId} not found.`);
+    this.name = "ProductImageNotFoundError";
+  }
+}
+
 export interface CreateProductVariantInput {
   size: string;
   color: string;
@@ -148,6 +171,15 @@ export interface CreateProductVariantInput {
 }
 
 export interface CreateProductImageInput {
+  url: string;
+  altText?: string;
+  position?: number;
+}
+
+/** G2/G3 — hard cap of 5 images per product, checked before the insert. */
+export const MAX_PRODUCT_IMAGES = 5;
+
+export interface AddImageInput {
   url: string;
   altText?: string;
   position?: number;
@@ -267,6 +299,62 @@ export async function addVariant(
       (error as { code?: string }).code === "P2002"
     ) {
       throw new DuplicateVariantError(productId, variant.size, variant.color);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Attaches an already-uploaded image to an existing product (design.md
+ * G1-G3). One read — `product.findUnique({ select: { id, images: {
+ * select: { position } } } })` — answers three questions at once: existence
+ * (ProductNotFoundError), the 5-image cap (TooManyImagesError), and the
+ * default `position` (max + 1). Reading the images collection twice (once
+ * for the cap, once for the max) would let those two facts disagree.
+ */
+export async function addImage(
+  prisma: PrismaClient,
+  productId: string,
+  input: AddImageInput,
+): Promise<ProductImage> {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, images: { select: { position: true } } },
+  });
+  if (!product) {
+    throw new ProductNotFoundError(productId);
+  }
+
+  if (product.images.length >= MAX_PRODUCT_IMAGES) {
+    throw new TooManyImagesError(productId, product.images.length);
+  }
+
+  const maxPosition = product.images.reduce((max, image) => Math.max(max, image.position), -1);
+
+  return prisma.productImage.create({
+    data: {
+      productId,
+      url: input.url,
+      altText: input.altText,
+      position: input.position ?? maxPosition + 1,
+    },
+  });
+}
+
+/**
+ * Deletes a ProductImage by its own PK (design.md G4) — the `[id]` segment
+ * of the route is NOT re-validated against `image.productId`; a cuid PK
+ * fully identifies the row. Deleting a product's last image is freely
+ * allowed: zero images is already a valid product state
+ * (isProductIncomplete tolerates it). Mirrors E3 verbatim: ProductImage has
+ * no non-FK precondition, so P2025 is the whole enforcement — no pre-check.
+ */
+export async function deleteImage(prisma: PrismaClient, imageId: string): Promise<void> {
+  try {
+    await prisma.productImage.delete({ where: { id: imageId } });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "P2025") {
+      throw new ProductImageNotFoundError(imageId);
     }
     throw error;
   }

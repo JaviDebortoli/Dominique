@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ProductImage } from "@/generated/prisma/client";
 import { ProductRow } from "./ProductRow";
 
 // Mirrors VariantRow.test.tsx's conventions: @testing-library/react +
@@ -60,7 +61,7 @@ const product = {
   categoryId: "cat-1",
   category: category1,
   variants: [variant1, variant2],
-  images: [],
+  images: [] as ProductImage[],
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -228,6 +229,30 @@ describe("ProductRow", () => {
     await user.click(screen.getByRole("button", { name: "2" }));
 
     expect(screen.queryByRole("button", { name: "Agregar" })).not.toBeInTheDocument();
+  });
+
+  it("mounts ProductImages only when the Variantes cell has been toggled expanded (design.md G9), leaving the shipped edit/delete flow unaffected", async () => {
+    const user = userEvent.setup();
+    renderRow({
+      images: [
+        { id: "img-1", productId: "prod-1", url: "/uploads/img-1.jpg", altText: null, position: 0, createdAt: new Date() },
+      ],
+    });
+
+    expect(screen.queryByLabelText(/Subir imagen/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+
+    expect(screen.getByLabelText(/Subir imagen/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+
+    expect(screen.queryByLabelText(/Subir imagen/i)).not.toBeInTheDocument();
+
+    // The shipped edit/delete flow for the product row itself is unaffected
+    // by the ProductImages mount.
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    expect(screen.getByLabelText(/nombre/i)).toHaveValue("Vestido Lino");
   });
 
   it("sends no DELETE request when confirm() returns false", async () => {
