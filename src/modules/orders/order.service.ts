@@ -46,6 +46,26 @@ export class StockUnavailableError extends Error {
   }
 }
 
+/** 2026-08-21-checkout-antiabuso — caps concurrent open PICKUP_CASH
+ * reservations per (email, phone). Mirrors TooManyImagesError: carries the
+ * observed count and the cap, never the PII (design.md "TooManyOpenReserva-
+ * tionsError carries counts, not identity" decision). */
+export class TooManyOpenReservationsError extends Error {
+  constructor(
+    public readonly openCount: number,
+    public readonly cap: number,
+  ) {
+    super(`This identity already has ${openCount} open pickup reservation(s); the cap is ${cap}.`);
+    this.name = "TooManyOpenReservationsError";
+  }
+}
+
+/** design.md "Cap counted inside the hold() transaction" decision —
+ * tasks.md 3.3. Soft under Read Committed concurrency (see that decision's
+ * rationale): the guard's job is bounding volume (3 vs. 300), not being the
+ * stock-safety authority — hold()'s conditional UPDATE remains that. */
+const MAX_OPEN_PICKUP_RESERVATIONS = 3;
+
 /** D5: PENDING_PAYMENT orders hold stock for 30 minutes before the MP
  * checkout submission expires. */
 const PENDING_PAYMENT_HOLD_MINUTES = 30;
@@ -146,10 +166,31 @@ export async function createPendingOrder(
     throw new StockUnavailableError(unavailable.map((line) => line.variantId));
   }
 
-  const { status, expiresAt } = await computeInitialOrderState(prisma, input.method, new Date());
+  // Hoisted so the cap's cutoff and the order's own expiresAt share one
+  // instant (design.md "Cap counted inside the hold() transaction").
+  const now = new Date();
+  const { status, expiresAt } = await computeInitialOrderState(prisma, input.method, now);
 
   return prisma.$transaction(
     async (tx) => {
+      // tasks.md 3.3 — first statement in the transaction, before
+      // order.create: a rejection throws before any write and rolls back
+      // to exactly today's behavior, with no compensating release.
+      if (input.method === "PICKUP_CASH") {
+        const openCount = await tx.order.count({
+          where: {
+            method: "PICKUP_CASH",
+            status: "RESERVED",
+            email: input.email,
+            phone: input.phone,
+            expiresAt: { gt: now },
+          },
+        });
+        if (openCount >= MAX_OPEN_PICKUP_RESERVATIONS) {
+          throw new TooManyOpenReservationsError(openCount, MAX_OPEN_PICKUP_RESERVATIONS);
+        }
+      }
+
       const order = await tx.order.create({
         data: {
           publicCode: generatePublicCode(),

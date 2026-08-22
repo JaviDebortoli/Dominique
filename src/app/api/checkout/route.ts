@@ -19,6 +19,7 @@ import {
   createPendingOrder,
   EmptyCartError,
   StockUnavailableError,
+  TooManyOpenReservationsError,
   type CheckoutLine,
   type PendingOrder,
 } from "@/modules/orders/order.service";
@@ -55,13 +56,40 @@ function isCheckoutLine(value: unknown): value is CheckoutLine {
   );
 }
 
+// tasks.md 1.1/1.2, design.md "Permissive plausibility helpers, local to
+// route.ts" — deliberately permissive: reject obviously-invalid values, not
+// enforce a strict Argentina-specific format (real customers write numbers
+// inconsistently: with/without leading 0, with 15, with/without area code).
+const MAX_EMAIL_LENGTH = 254; // RFC 5321 practical maximum
+
+function isPlausibleEmail(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length <= MAX_EMAIL_LENGTH && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed);
+}
+
+function isPlausiblePhone(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^[\d\s()+.-]+$/.test(trimmed)) return false;
+  const digits = trimmed.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15; // AR local minimum ... E.164 maximum
+}
+
+/** design.md "Discriminated validation result" decision — `shape` covers
+ * presence/type issues (unchanged behavior, still 400 invalid_request);
+ * `contact` is the new email/phone plausibility check, carrying which field
+ * failed so the route can respond with a specific, actionable message. */
+type CheckoutValidationFailure = { reason: "shape" } | { reason: "contact"; field: "email" | "phone" };
+type CheckoutValidationResult =
+  | { ok: true; value: ValidatedCheckoutRequest }
+  | { ok: false; failure: CheckoutValidationFailure };
+
 /**
- * Validates the raw request body shape (contact fields present, method is
- * one of the two allowed OrderMethod values, items is an array of
- * well-formed lines). Returns null when the shape itself is invalid — this
- * is separate from stock re-validation, which order.service.ts owns.
+ * Validates the raw request body: shape first (contact fields present,
+ * method is one of the two allowed OrderMethod values, items is an array of
+ * well-formed lines), then contact-format plausibility. This is separate
+ * from stock re-validation, which order.service.ts owns.
  */
-function validateRequestBody(body: CheckoutRequestBody): ValidatedCheckoutRequest | null {
+function validateRequestBody(body: CheckoutRequestBody): CheckoutValidationResult {
   if (
     !isNonEmptyString(body.buyerName) ||
     !isNonEmptyString(body.phone) ||
@@ -70,15 +98,25 @@ function validateRequestBody(body: CheckoutRequestBody): ValidatedCheckoutReques
     !Array.isArray(body.items) ||
     !body.items.every(isCheckoutLine)
   ) {
-    return null;
+    return { ok: false, failure: { reason: "shape" } };
+  }
+
+  if (!isPlausibleEmail(body.email)) {
+    return { ok: false, failure: { reason: "contact", field: "email" } };
+  }
+  if (!isPlausiblePhone(body.phone)) {
+    return { ok: false, failure: { reason: "contact", field: "phone" } };
   }
 
   return {
-    buyerName: body.buyerName,
-    phone: body.phone,
-    email: body.email,
-    method: body.method,
-    items: body.items,
+    ok: true,
+    value: {
+      buyerName: body.buyerName,
+      phone: body.phone,
+      email: body.email,
+      method: body.method,
+      items: body.items,
+    },
   };
 }
 
@@ -147,10 +185,25 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const validated = validateRequestBody(rawBody);
-  if (!validated) {
+  const validation = validateRequestBody(rawBody);
+  if (!validation.ok) {
+    if (validation.failure.reason === "contact") {
+      const { field } = validation.failure;
+      return NextResponse.json(
+        {
+          error: "invalid_contact",
+          field,
+          message:
+            field === "email"
+              ? "Revisá el email: no parece una dirección de correo válida."
+              : "Revisá el teléfono: ingresá al menos 8 números (podés usar espacios, guiones, paréntesis o +).",
+        },
+        { status: 400 },
+      );
+    }
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const validated = validation.value;
 
   try {
     const order = await createPendingOrder(prisma, validated);
@@ -174,6 +227,17 @@ export async function POST(request: Request): Promise<Response> {
           variantIds: error.variantIds,
           message:
             "Alguno de los talles seleccionados ya no está disponible. Actualizá tu carrito e intentá de nuevo.",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof TooManyOpenReservationsError) {
+      return NextResponse.json(
+        {
+          error: "too_many_open_reservations",
+          message:
+            `Ya tenés ${error.cap} reservas para retirar en el local sin confirmar. ` +
+            `Pasá a retirarlas o escribinos para cancelar alguna antes de hacer una nueva.`,
         },
         { status: 409 },
       );

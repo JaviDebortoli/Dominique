@@ -144,4 +144,31 @@ describe("CheckoutForm", () => {
       await screen.findByText(/ya no está disponible/i),
     ).toBeInTheDocument();
   });
+
+  // tasks.md 1.4 — invalid_contact (400) uses the same generic body.message
+  // renderer as stock_unavailable (lines 71-78): no dedicated UI branch is
+  // needed for this new error code.
+  it("shows the invalid_contact error message returned by the API in role=alert (tasks.md 1.4)", async () => {
+    const user = userEvent.setup();
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: "invalid_contact",
+        field: "phone",
+        message:
+          "Revisá el teléfono: ingresá al menos 8 números (podés usar espacios, guiones, paréntesis o +).",
+      }),
+    });
+
+    render(<CheckoutForm items={items} />);
+    await user.type(screen.getByLabelText(/nombre/i), "Ana Pérez");
+    await user.type(screen.getByLabelText(/tel[eé]fono/i), "x");
+    await user.type(screen.getByLabelText(/email/i), "ana@example.com");
+    await user.click(screen.getByRole("radio", { name: /pagar con mercadopago/i }));
+    await user.click(screen.getByRole("button", { name: /confirmar pedido/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/revis[aá] el tel[eé]fono/i);
+  });
 });

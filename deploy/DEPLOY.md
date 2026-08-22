@@ -277,12 +277,44 @@ nginx -t                    # validates syntax BEFORE reloading
 systemctl reload nginx
 ```
 
-Confirm the webhook rate-limit zone is actually active (design.md Threat
-Matrix "Untrusted webhook intake"):
+Confirm the rate-limit zones are actually active (design.md Threat Matrix
+"Untrusted webhook intake", and 2026-08-21-checkout-antiabuso's checkout +
+admin-login zones):
 
 ```bash
 nginx -T | grep limit_req_zone
-# expect: limit_req_zone $binary_remote_addr zone=mp_webhook:10m rate=5r/s;
+# expect all three:
+#   limit_req_zone $binary_remote_addr zone=mp_webhook:10m rate=5r/s;
+#   limit_req_zone $binary_remote_addr zone=checkout:10m rate=20r/m;
+#   limit_req_zone $admin_login_limit_key zone=admin_login:10m rate=5r/m;
+```
+
+### Manual verification — checkout and admin-login rate limits (2026-08-21-checkout-antiabuso, tasks.md 2.6)
+
+No automated harness exists for Nginx config — this is the runbook step
+that stands in for one:
+
+```bash
+nginx -t
+# expect: syntax is ok / test is successful
+
+nginx -T | grep limit_req_zone
+# expect the three zones shown above (mp_webhook, checkout, admin_login)
+
+# 21st POST to /api/checkout within the same minute from one IP -> 429
+for i in $(seq 1 21); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST https://YOUR_REAL_DOMAIN/api/checkout \
+    -H "content-type: application/json" -d '{}'
+done
+# expect: the first 20 responses are NOT 429 (whatever the app itself
+# returns for an invalid/empty body — 400, not 429); the 21st is 429
+
+# A plain GET to /admin/login is never throttled (only POST is keyed by the
+# $admin_login_limit_key map above):
+for i in $(seq 1 10); do
+  curl -s -o /dev/null -w "%{http_code}\n" https://YOUR_REAL_DOMAIN/admin/login
+done
+# expect: every response is 200, never 429
 ```
 
 At this point `http://YOUR_REAL_DOMAIN` should already proxy to the app
