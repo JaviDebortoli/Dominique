@@ -21,6 +21,15 @@ export const authConfig = {
   },
   session: {
     strategy: "jwt",
+    // Idle-timeout, not a fixed lifetime: every session() check (proxy.ts
+    // middleware, auth() calls) re-issues the cookie with maxAge from now
+    // (@auth/core's session action always sets an explicit `expires`), so
+    // this is "8h since the last request", not "8h since login". Owner
+    // decision (docs/bugs.md): bounded idle timeout, not a hard
+    // close-tab-to-logout — Auth.js's own session-refresh cookie write
+    // forces an explicit expiry on every check, so a true session-only
+    // cookie isn't reachable without disabling that refresh.
+    maxAge: 8 * 60 * 60,
   },
   callbacks: {
     authorized({ auth, request }) {
