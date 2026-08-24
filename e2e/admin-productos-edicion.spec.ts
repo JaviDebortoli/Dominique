@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config();
+dotenv.config({ path: ".env.test", override: true });
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { prisma } from "@/lib/db";

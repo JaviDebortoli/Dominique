@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:test:setup": "tsx scripts/setup-test-db.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
