@@ -268,6 +268,38 @@ describe("product.service (integration, real Postgres)", () => {
       expect(found?.variants).toHaveLength(1);
       expect(found?.images).toHaveLength(1);
     });
+
+    // docs/bugs.md "Problemas ahora": a blocked category delete needs a
+    // shortcut straight to that category's products, so the admin doesn't
+    // have to hunt for them in the full unfiltered list.
+    it("filters to only the given category's products when categoryId is passed", async () => {
+      const categoryA = await makeCategory("admin-filter-a");
+      const categoryB = await makeCategory("admin-filter-b");
+      const suffix = randomUUID();
+
+      const productA = await createProduct(prisma, {
+        name: "Producto A",
+        slug: `producto-filter-a-${suffix}`,
+        price: 1000,
+        categoryId: categoryA.id,
+        variants: [{ size: "U", color: "Unico", sku: `FLTA-${suffix}` }],
+      });
+      createdProductIds.push(productA.id);
+
+      const productB = await createProduct(prisma, {
+        name: "Producto B",
+        slug: `producto-filter-b-${suffix}`,
+        price: 1000,
+        categoryId: categoryB.id,
+        variants: [{ size: "U", color: "Unico", sku: `FLTB-${suffix}` }],
+      });
+      createdProductIds.push(productB.id);
+
+      const rows = await listAllProductsForAdmin(prisma, { categoryId: categoryA.id });
+
+      expect(rows.some((row) => row.id === productA.id)).toBe(true);
+      expect(rows.some((row) => row.id === productB.id)).toBe(false);
+    });
   });
 
   // tasks.md 1.1/1.2 — design.md F1: updateProduct never writes slug.

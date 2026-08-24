@@ -10,6 +10,7 @@
 // The slug cell in edit mode deliberately stays uneditable text
 // (/categoria/{slug}, text-outline) — design.md's UI Shape: the owner sees,
 // at the moment of renaming, that the public URL does not follow the label.
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { AdminCategoryRow } from "@/modules/catalog/category.service";
@@ -23,6 +24,9 @@ export function CategoryRow({ category }: CategoryRowProps) {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [name, setName] = useState(category.name);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // docs/bugs.md: a delete blocked by assigned products needs a shortcut
+  // straight to those products, not just an error message.
+  const [blockedByProducts, setBlockedByProducts] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   function enterEdit() {
@@ -73,6 +77,7 @@ export function CategoryRow({ category }: CategoryRowProps) {
     }
 
     setErrorMessage(null);
+    setBlockedByProducts(false);
 
     try {
       const response = await fetch(`/api/admin/categories/${category.id}`, {
@@ -82,6 +87,7 @@ export function CategoryRow({ category }: CategoryRowProps) {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setErrorMessage(body.message ?? "No pudimos eliminar la categoría.");
+        setBlockedByProducts(body.error === "category_has_products");
         return;
       }
 
@@ -167,6 +173,14 @@ export function CategoryRow({ category }: CategoryRowProps) {
             <p role="alert" className="font-sans text-body-sm text-red-700">
               {errorMessage}
             </p>
+          ) : null}
+          {blockedByProducts ? (
+            <Link
+              href={`/admin/productos?categoria=${category.id}`}
+              className="font-sans text-body-sm text-ink underline underline-offset-2"
+            >
+              Ver productos de esta categoría
+            </Link>
           ) : null}
         </div>
       </td>

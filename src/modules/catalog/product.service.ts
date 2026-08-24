@@ -591,14 +591,25 @@ export type AdminProductRow = Product & {
   images: ProductImage[];
 };
 
+export interface ListAllProductsForAdminFilter {
+  categoryId?: string;
+}
+
 /**
  * tasks.md 7.3 — lists EVERY product (unlike listCuratedProducts's `take`
  * limit or listProductsByCategory's per-category filter) with its category,
  * variants, and images, for the admin/productos table
- * (specs/admin-console/spec.md "Product and Variant Management").
+ * (specs/admin-console/spec.md "Product and Variant Management"). Optional
+ * `categoryId` narrows the list — used by the "reassign products" shortcut
+ * a blocked category delete links to (docs/bugs.md), so the admin isn't
+ * left hunting through every product for the ones still assigned.
  */
-export async function listAllProductsForAdmin(prisma: PrismaClient): Promise<AdminProductRow[]> {
+export async function listAllProductsForAdmin(
+  prisma: PrismaClient,
+  filter?: ListAllProductsForAdminFilter,
+): Promise<AdminProductRow[]> {
   return prisma.product.findMany({
+    where: filter?.categoryId ? { categoryId: filter.categoryId } : undefined,
     orderBy: { createdAt: "desc" },
     include: {
       category: true,
