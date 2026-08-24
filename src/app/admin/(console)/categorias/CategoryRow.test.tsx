@@ -184,4 +184,43 @@ describe("CategoryRow", () => {
     );
     expect(refreshMock).not.toHaveBeenCalled();
   });
+
+  // docs/bugs.md "Problemas ahora": a blocked delete needs a shortcut
+  // straight to the products still assigned, not just an error message.
+  it("renders a link to the filtered product list when delete is blocked by assigned products", async () => {
+    (window.confirm as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "category_has_products",
+        message:
+          "No se puede eliminar: tiene 3 producto(s) asignados. Reasigná esos productos primero.",
+        productCount: 3,
+      }),
+    });
+
+    const user = userEvent.setup();
+    renderRow();
+    await user.click(screen.getByRole("button", { name: "Eliminar" }));
+
+    const link = await screen.findByRole("link", { name: "Ver productos de esta categoría" });
+    expect(link).toHaveAttribute("href", "/admin/productos?categoria=cat-1");
+  });
+
+  it("renders no shortcut link for a non-category_has_products delete error", async () => {
+    (window.confirm as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "category_not_found", message: "Categoría no encontrada." }),
+    });
+
+    const user = userEvent.setup();
+    renderRow();
+    await user.click(screen.getByRole("button", { name: "Eliminar" }));
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("link", { name: "Ver productos de esta categoría" })).not.toBeInTheDocument();
+  });
 });
