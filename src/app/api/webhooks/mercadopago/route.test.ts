@@ -202,4 +202,94 @@ describe("POST /api/webhooks/mercadopago (integration, real Postgres, fake MP cl
     const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
     expect(updatedVariant.onHand).toBe(2);
   });
+
+  it("responds 200 for a duplicate delivery AND logs it via console.warn (otherwise unobservable)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { order } = await makePendingOrder(3, 1);
+      const dataId = `route-dup-logged-${randomUUID()}`;
+      const requestId = `req-${randomUUID()}`;
+      fakeClient.registerPayment({
+        id: dataId,
+        status: "approved",
+        externalReference: order.id,
+        transactionAmount: 12000,
+      });
+      const header = realSignatureHeader(dataId, requestId);
+
+      await POST(webhookRequest({ dataId, requestId, signatureHeader: header }));
+      const second = await POST(webhookRequest({ dataId, requestId, signatureHeader: header }));
+
+      expect(second.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("duplicate"),
+        expect.objectContaining({ orderId: order.id }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  // Money-tracking blind spots: these outcomes previously returned 200 with
+  // ZERO trace anywhere (no log line), which is the exact gap this test
+  // guards against — see the module doc's "always 200" note for why the
+  // HTTP status can't be the signal instead.
+  it("logs order_not_found via console.error while still responding 200, so a paid-but-orphaned payment is queryable", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const dataId = `route-orphan-${randomUUID()}`;
+      const requestId = `req-${randomUUID()}`;
+      // No matching Order was ever created for this externalReference —
+      // simulates a deleted/expired/mistyped order id.
+      const orphanOrderId = randomUUID();
+      fakeClient.registerPayment({
+        id: dataId,
+        status: "approved",
+        externalReference: orphanOrderId,
+        transactionAmount: 12000,
+      });
+
+      const response = await POST(
+        webhookRequest({ dataId, requestId, signatureHeader: realSignatureHeader(dataId, requestId) }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("order_not_found"),
+        expect.objectContaining({ orderId: orphanOrderId }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs ignored_status via console.warn while still responding 200", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { order } = await makePendingOrder(2, 1);
+      const dataId = `route-ignored-${randomUUID()}`;
+      const requestId = `req-${randomUUID()}`;
+      // Any MP status outside approved/rejected/cancelled/pending/in_process
+      // falls into "ignored_status" — "authorized" is a real MP status this
+      // app deliberately takes no action on.
+      fakeClient.registerPayment({
+        id: dataId,
+        status: "authorized",
+        externalReference: order.id,
+        transactionAmount: 12000,
+      });
+
+      const response = await POST(
+        webhookRequest({ dataId, requestId, signatureHeader: realSignatureHeader(dataId, requestId) }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("ignored_status"),
+        expect.objectContaining({ orderId: order.id, status: "authorized" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

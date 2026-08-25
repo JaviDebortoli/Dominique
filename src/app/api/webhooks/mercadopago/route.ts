@@ -43,11 +43,31 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
     case "missing_data_id":
       return NextResponse.json({ error: "missing_data_id" }, { status: 400 });
+    case "order_not_found":
+      // A verified, server-refetched payment has no matching Order
+      // (deleted/expired/mistyped external_reference) — money may have
+      // moved with zero trace anywhere else in the app. Still answer 200
+      // (design.md: never make MercadoPago retry), but this MUST be logged
+      // so it's queryable instead of only discoverable by manually diffing
+      // the MercadoPago dashboard against the orders table.
+      console.error("[mercadopago webhook] order_not_found", { orderId: outcome.orderId });
+      return new NextResponse(null, { status: 200 });
+    case "ignored_status":
+      // A payment status this app deliberately takes no action on (e.g.
+      // "authorized") — expected, but worth a trace in case it turns out to
+      // matter later.
+      console.warn("[mercadopago webhook] ignored_status", { orderId: outcome.orderId, status: outcome.status });
+      return new NextResponse(null, { status: 200 });
+    case "approved":
+      if (outcome.duplicate) {
+        // A redelivery of a notification already processed (idempotency
+        // guard held) — harmless, but silent duplicates are worth a trace
+        // to distinguish "MP retried" from "someone re-sent this".
+        console.warn("[mercadopago webhook] duplicate approved notification", { orderId: outcome.orderId });
+      }
+      return new NextResponse(null, { status: 200 });
     default:
-      // approved / rejected / pending / duplicate / order_not_found /
-      // ignored_status — always 200 once the signature is verified, so
-      // MercadoPago stops retrying (design.md: "always answer 200 after
-      // persisting").
+      // rejected / pending — normal terminal outcomes, nothing to log.
       return new NextResponse(null, { status: 200 });
   }
 }
