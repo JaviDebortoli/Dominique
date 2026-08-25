@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getCart } from "@/modules/cart/cart-cookie";
+import { getCart, removeCartItem, updateCartQty } from "@/modules/cart/cart-cookie";
 import { resolveCartLines } from "@/modules/cart/cart-lines";
 import { formatPriceARS } from "@/lib/format-price";
+import { CartLineControls } from "@/components/storefront/CartLineControls";
 
 // Cart page. Backs specs/cart-checkout/spec.md:
 //   - "Cart View" (line list + subtotal)
@@ -84,6 +85,13 @@ export default async function CartPage() {
                   Solo quedan {line.available}. Ajustá la cantidad.
                 </p>
               ) : null}
+              <CartLineControls
+                qty={line.qty}
+                max={line.maxSelectable}
+                label={line.label}
+                onUpdateQty={updateCartQty.bind(null, line.variantId)}
+                onRemove={removeCartItem.bind(null, line.variantId)}
+              />
             </div>
             <p className="font-sans text-price-display tabular-nums text-ink">
               {formatPriceARS(line.unitPrice * line.qty)}
