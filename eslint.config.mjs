@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Nested git worktrees are separate checkouts, not part of this codebase.
+    ".claude/worktrees/**",
   ]),
   {
     // deploy/testing/** are plain Node CommonJS scripts (test-only stand-ins
