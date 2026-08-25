@@ -255,6 +255,30 @@ describe("ProductRow", () => {
     expect(screen.getByLabelText(/nombre/i)).toHaveValue("Vestido Lino");
   });
 
+  it("keeps the expanded VariantRow/AddVariantForm/ProductImages rows visible while editing the product's core fields (they must not disappear just because Editar was clicked)", async () => {
+    const user = userEvent.setup();
+    renderRow({
+      images: [
+        { id: "img-1", productId: "prod-1", url: "/uploads/img-1.jpg", altText: null, position: 0, createdAt: new Date() },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getByText("VL-BEI-M")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Subir imagen/i)).toBeInTheDocument();
+
+    // Once expanded, VariantRow contributes its OWN "Editar" buttons too —
+    // the product row's is the first one in document order (it renders
+    // before the expanded VariantRow sub-rows).
+    await user.click(screen.getAllByRole("button", { name: "Editar" })[0]);
+
+    expect(screen.getByLabelText(/nombre/i)).toHaveValue("Vestido Lino");
+    expect(screen.getByText("VL-BEI-M")).toBeInTheDocument();
+    expect(screen.getByText("VL-BEI-L")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Agregar" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Subir imagen/i)).toBeInTheDocument();
+  });
+
   it("sends no DELETE request when confirm() returns false", async () => {
     const user = userEvent.setup();
     (window.confirm as ReturnType<typeof vi.fn>).mockReturnValue(false);

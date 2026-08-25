@@ -142,8 +142,14 @@ export function ProductRow({ product, categories }: ProductRowProps) {
 
   const inputClassName = "border border-ink/20 px-3 py-2";
 
-  if (mode === "edit") {
-    return (
+  // Edit mode swaps ONLY this top <tr> for the product-fields form — the
+  // expanded variant/image rows below (gated on `expanded`, independent of
+  // `mode`) must keep rendering regardless, or clicking "Editar" while
+  // expanded makes them vanish with no indication why (the actual bug
+  // report this fixes: variants/images "can't be edited" because they
+  // silently disappeared the moment product-field editing started).
+  const headerRow =
+    mode === "edit" ? (
       <tr className="border-b border-ink/10">
         <td colSpan={6} className="py-4">
           <form
@@ -223,11 +229,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
           </form>
         </td>
       </tr>
-    );
-  }
-
-  return (
-    <>
+    ) : (
       <tr className="border-b border-ink/10">
         <td className="py-2">{product.name}</td>
         <td className="py-2">{product.category.name}</td>
@@ -274,6 +276,11 @@ export function ProductRow({ product, categories }: ProductRowProps) {
           </div>
         </td>
       </tr>
+    );
+
+  return (
+    <>
+      {headerRow}
       {expanded
         ? product.variants.map((variant) => (
             <VariantRow key={variant.id} productId={product.id} variant={variant} />
