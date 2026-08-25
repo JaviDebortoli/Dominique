@@ -15,6 +15,7 @@
 
 import bcrypt from "bcryptjs";
 import type { PrismaClient } from "@/generated/prisma/client";
+import { isLoginBlocked, recordLoginFailure, recordLoginSuccess } from "./login-rate-limit";
 
 export interface AdminIdentity {
   id: string;
@@ -52,16 +53,28 @@ export async function verifyAdminCredentials(
     return null;
   }
 
+  // App-level fallback for deploy/nginx.conf's `admin_login` zone (see
+  // login-rate-limit.ts's module doc) — checked BEFORE the DB lookup and
+  // bcrypt.compare so an exhausted budget also skips the CPU cost, not just
+  // the result. Only wrong-password/unknown-email failures count toward
+  // the budget; a success clears it below.
+  if (isLoginBlocked(normalizedEmail)) {
+    return null;
+  }
+
   const admin = await prisma.adminUser.findUnique({ where: { email: normalizedEmail } });
   if (!admin) {
     await bcrypt.compare(password, DUMMY_HASH);
+    recordLoginFailure(normalizedEmail);
     return null;
   }
 
   const valid = await bcrypt.compare(password, admin.passwordHash);
   if (!valid) {
+    recordLoginFailure(normalizedEmail);
     return null;
   }
 
+  recordLoginSuccess(normalizedEmail);
   return { id: admin.id, email: admin.email, name: admin.name };
 }

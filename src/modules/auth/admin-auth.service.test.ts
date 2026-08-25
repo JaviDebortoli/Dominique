@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { verifyAdminCredentials } from "./admin-auth.service";
+import { resetLoginRateLimitForTests } from "./login-rate-limit";
 
 // Integration tests against the real local Postgres (design.md Testing
 // Strategy: "no mocked Prisma" for anything DB-shaped).
@@ -74,5 +75,68 @@ describe("admin-auth.service — verifyAdminCredentials() (integration, real Pos
 
   it("rejects empty-string credentials", async () => {
     await expect(verifyAdminCredentials(prisma, "", "")).resolves.toBeNull();
+  });
+
+  describe("login rate limiting (app-level fallback for deploy/nginx.conf's admin_login zone)", () => {
+    it(
+      "rejects further attempts for the same email once the per-email budget is exhausted, even with the correct password",
+      async () => {
+        resetLoginRateLimitForTests();
+        const suffix = randomUUID();
+        const email = `rate-limited-${suffix}@example.com`;
+        await makeAdmin(email, "correct-horse-battery-staple");
+
+        // Burns the budget with wrong-password attempts, mirroring a real
+        // brute-force sequence against one known account. Each of these
+        // still runs a real bcrypt-cost-12 compare (only attempts BEYOND
+        // the budget skip it) — that's why this needs a longer timeout than
+        // the other, single-attempt tests in this file.
+        for (let i = 0; i < 5; i++) {
+          await verifyAdminCredentials(prisma, email, "wrong-password");
+        }
+
+        // Budget's gone for this window: even the CORRECT password is now
+        // rejected — same "answer the endpoint, not the password" behavior
+        // Nginx's own limit_req zone already has.
+        const result = await verifyAdminCredentials(prisma, email, "correct-horse-battery-staple");
+        expect(result).toBeNull();
+      },
+      20_000,
+    );
+
+    it(
+      "does not exhaust one email's budget when attempts are made against a different email",
+      async () => {
+        resetLoginRateLimitForTests();
+        const suffix = randomUUID();
+        const floodedEmail = `flooded-${suffix}@example.com`;
+        const ownerEmail = `owner-untouched-${suffix}@example.com`;
+        await makeAdmin(ownerEmail, "correct-horse-battery-staple");
+
+        for (let i = 0; i < 5; i++) {
+          await verifyAdminCredentials(prisma, floodedEmail, "wrong-password");
+        }
+
+        const result = await verifyAdminCredentials(prisma, ownerEmail, "correct-horse-battery-staple");
+        expect(result).not.toBeNull();
+      },
+      20_000,
+    );
+
+    it(
+      "never blocks repeated CONSECUTIVE successful logins for the same email (matches e2e's loginAsAdmin() pattern, called once per test against one seeded account)",
+      async () => {
+        resetLoginRateLimitForTests();
+        const suffix = randomUUID();
+        const email = `repeat-login-${suffix}@example.com`;
+        await makeAdmin(email, "correct-horse-battery-staple");
+
+        for (let i = 0; i < 6; i++) {
+          const result = await verifyAdminCredentials(prisma, email, "correct-horse-battery-staple");
+          expect(result).not.toBeNull();
+        }
+      },
+      30_000,
+    );
   });
 });
