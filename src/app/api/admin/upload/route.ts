@@ -60,6 +60,13 @@ const ALLOWED_TYPES: Record<string, { extension: string; sharpFormat: "jpeg" | "
   "image/webp": { extension: "webp", sharpFormat: "webp" },
 };
 
+// Defense-in-depth against an authenticated admin uploading a huge file and
+// exhausting memory/CPU (sharp's decode is the expensive step) before any
+// content check ever runs. This is the ONLY size guard active in local dev
+// (no Nginx in front of `next dev`); deploy/nginx.conf's client_max_body_size
+// is a second, production-only layer on top of this one.
+export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
 // D8: `/var/dominique/uploads` in production (see this file's module doc
 // for the local-dev adaptation rationale). `public/` is Next.js's
 // static-asset root, so a file written here is immediately servable at
@@ -97,6 +104,16 @@ export async function POST(request: Request): Promise<Response> {
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "missing_file" }, { status: 400 });
+  }
+
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return NextResponse.json(
+      {
+        error: "file_too_large",
+        message: `El archivo supera el límite de ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB.`,
+      },
+      { status: 413 },
+    );
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());

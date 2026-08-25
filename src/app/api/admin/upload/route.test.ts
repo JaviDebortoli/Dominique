@@ -11,6 +11,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { asMockedAuth, fakeAdminSession, makeAuthMockModule } from "@/lib/testing/admin-auth-mock";
+import { MAX_FILE_SIZE_BYTES } from "./route";
 
 // tasks.md 7.4/7.5 — design.md Threat Matrix row "Documentation-like /
 // executable-file classification": "Allow-list image/jpeg,png,webp by
@@ -188,6 +189,39 @@ describe("POST /api/admin/upload", () => {
 
       expect(response.status).toBe(400);
       expect(listUploadFiles()).toEqual(before);
+    });
+  });
+
+  describe("size limit — rejects an oversized upload before decoding it", () => {
+    it("rejects a file larger than MAX_FILE_SIZE_BYTES with 413, without writing anything to disk", async () => {
+      const before = listUploadFiles();
+      const oversized = new Uint8Array(MAX_FILE_SIZE_BYTES + 1);
+      const file = new File([oversized], "huge.png", { type: "image/png" });
+
+      const response = await POST(uploadRequest(file));
+
+      expect(response.status).toBe(413);
+      expect(listUploadFiles()).toEqual(before);
+    });
+
+    it("accepts a file exactly at MAX_FILE_SIZE_BYTES", async () => {
+      const pngBuffer = await sharp({
+        create: { width: 4, height: 4, channels: 3, background: { r: 200, g: 100, b: 50 } },
+      })
+        .png()
+        .toBuffer();
+      // Padding an otherwise-valid PNG up to the exact limit — this is the
+      // boundary case for the `>` vs `>=` decision in the route.
+      const padded = new Uint8Array(MAX_FILE_SIZE_BYTES);
+      padded.set(pngBuffer);
+      const file = new File([padded], "at-limit.png", { type: "image/png" });
+
+      const response = await POST(uploadRequest(file));
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      const savedName = path.basename(body.url);
+      filesToCleanUp.push(savedName);
     });
   });
 
