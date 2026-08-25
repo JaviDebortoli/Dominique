@@ -14,6 +14,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { clearCart } from "@/modules/cart/cart-cookie";
 import { release } from "@/modules/inventory/stock.service";
 import {
   createPendingOrder,
@@ -207,6 +208,17 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const order = await createPendingOrder(prisma, validated);
+
+    // design.md D4 — one call covers both the 201 JSON (PICKUP_CASH) and the
+    // 303 redirect (MP): Next merges requestStore.mutableCookies into
+    // whatever Response this handler returns, so the Set-Cookie rides
+    // either shape. try/catch-and-ignore: a failed cookie write must never
+    // fail an already-created order (proposal.md's edge case).
+    try {
+      await clearCart();
+    } catch (error) {
+      console.error("Failed to clear cart after order creation", error);
+    }
 
     if (order.method === "MP") {
       return createMercadoPagoRedirect(order);

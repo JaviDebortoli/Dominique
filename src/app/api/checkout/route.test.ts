@@ -1,9 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { createProduct } from "@/modules/catalog/product.service";
 import { hold } from "@/modules/inventory/stock.service";
 import type { MercadoPagoClient } from "@/modules/payments/mercadopago";
+
+// tasks.md 3.1 / design.md D4 — clearCart() (src/modules/cart/cart-cookie.ts)
+// calls next/headers' cookies(), which only resolves inside a real Next.js
+// request/render. This direct-call harness is not one (same reasoning as
+// carrito/page.test.tsx), so it is mocked. Left unconfigured, `cookies()`
+// resolves to `undefined` and clearCart()'s write throws — exercising
+// route.ts's try/catch-and-ignore path for every test in this file that
+// does not explicitly opt in via mockCookieStore()/mockCookiesRejecting().
+vi.mock("next/headers", () => ({ cookies: vi.fn() }));
+const mockedCookies = vi.mocked(cookies);
 
 // task 5.1: preference created for a PENDING_PAYMENT order, 303 redirect to
 // init_point. The real MP SDK boundary is swapped for a fake via vi.mock —
@@ -82,6 +93,10 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
       body: JSON.stringify(body),
     });
   }
+
+  afterEach(() => {
+    mockedCookies.mockReset();
+  });
 
   it("creates a RESERVED order and returns 201 with the public code (tasks.md 4.6, updated by 6.2/6.3)", async () => {
     const variant = await makeVariant(4);
@@ -382,6 +397,92 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
       const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
       expect(updatedVariant.held).toBe(0);
       expect(updatedVariant.onHand).toBe(1);
+    });
+  });
+
+  // tasks.md 3.1, design.md D4 — clearCart() runs immediately after
+  // createPendingOrder() succeeds, before the MP branch, so it fires
+  // identically for the 201 JSON (PICKUP_CASH) and 303 redirect (MP) paths.
+  // Wrapped in try/catch-and-ignore: a failed cookie write must never fail
+  // an already-created order.
+  describe("Cart cleared after order creation (tasks.md 3.1, design.md D4)", () => {
+    function mockCookieStore(initial: Record<string, string> = {}) {
+      const store = new Map(Object.entries(initial));
+      mockedCookies.mockResolvedValue({
+        get: (name: string) => (store.has(name) ? { value: store.get(name)! } : undefined),
+        set: (name: string, value: string) => {
+          store.set(name, value);
+        },
+      } as unknown as Awaited<ReturnType<typeof cookies>>);
+      return store;
+    }
+
+    it("clears the cart cookie on a successful PICKUP_CASH order (201 JSON)", async () => {
+      const variant = await makeVariant(2);
+      const store = mockCookieStore({
+        dominique_cart: JSON.stringify([{ variantId: variant.id, qty: 1 }]),
+      });
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Clear",
+          phone: "3815550030",
+          email: "clear@example.com",
+          method: "PICKUP_CASH",
+          items: [{ variantId: variant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      createdOrderIds.push(body.orderId);
+      expect(store.get("dominique_cart")).toBe("[]");
+    });
+
+    it("clears the cart cookie on a successful MercadoPago order (303 redirect)", async () => {
+      const variant = await makeVariant(2);
+      fakeCreatePreference = async (input) => ({
+        preferenceId: `pref-${input.orderId}`,
+        initPoint: `https://mp.example.com/pay/${input.orderId}`,
+      });
+      const store = mockCookieStore({
+        dominique_cart: JSON.stringify([{ variantId: variant.id, qty: 1 }]),
+      });
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Clear MP",
+          phone: "3815550031",
+          email: "clearmp@example.com",
+          method: "MP",
+          items: [{ variantId: variant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(303);
+      const location = response.headers.get("location");
+      const orderId = location!.split("/").pop()!;
+      createdOrderIds.push(orderId);
+      expect(store.get("dominique_cart")).toBe("[]");
+    });
+
+    it("still creates the order successfully when the cart cookie write throws", async () => {
+      const variant = await makeVariant(2);
+      mockedCookies.mockRejectedValue(new Error("cookies unavailable outside request scope"));
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Cookie Falla",
+          phone: "3815550032",
+          email: "cookiefalla@example.com",
+          method: "PICKUP_CASH",
+          items: [{ variantId: variant.id, qty: 1 }],
+        }),
+      );
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      createdOrderIds.push(body.orderId);
     });
   });
 });
