@@ -400,6 +400,68 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
     });
   });
 
+  // design.md Threat Matrix — "Untrusted input → Server Action" and
+  // "Client-side stock cap bypass" (tasks.md 4.1). The `/carrito` UI cap is
+  // a courtesy layer only; a hand-crafted request bypassing it entirely
+  // (an absurd qty, or a variantId the UI never offered) MUST still be
+  // rejected by this route's existing StockUnavailableError gate, naming
+  // the offending id(s), with no order row and no stock hold left behind.
+  describe("Threat Matrix: untrusted qty and unknown variantId (design.md Threat Matrix, tasks.md 4.1)", () => {
+    it("rejects an absurdly large qty (1e9) beyond available stock with 409, names the variantId, and creates no order/hold", async () => {
+      const variant = await makeVariant(2);
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Exceso",
+          phone: "3815550040",
+          email: "exceso@example.com",
+          method: "PICKUP_CASH",
+          items: [{ variantId: variant.id, qty: 1e9 }],
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error).toBe("stock_unavailable");
+      expect(body.variantIds).toEqual([variant.id]);
+
+      const ordersForVariant = await prisma.orderItem.findMany({ where: { variantId: variant.id } });
+      expect(ordersForVariant).toHaveLength(0);
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(0);
+    });
+
+    it("rejects a checkout line referencing a variantId that does not exist with 409 naming that id, and leaves an accompanying real line's stock untouched", async () => {
+      const variant = await makeVariant(2);
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Fantasma",
+          phone: "3815550041",
+          email: "fantasma@example.com",
+          method: "PICKUP_CASH",
+          items: [
+            { variantId: variant.id, qty: 1 },
+            { variantId: "variant-que-no-existe", qty: 1 },
+          ],
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error).toBe("stock_unavailable");
+      expect(body.variantIds).toEqual(["variant-que-no-existe"]);
+
+      // The whole submission is rejected before the transaction opens
+      // (order.service.ts's pre-check) — the real line never gets an
+      // order/hold either, not just the unresolvable one.
+      const ordersForVariant = await prisma.orderItem.findMany({ where: { variantId: variant.id } });
+      expect(ordersForVariant).toHaveLength(0);
+      const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+      expect(updatedVariant.held).toBe(0);
+    });
+  });
+
   // tasks.md 3.1, design.md D4 — clearCart() runs immediately after
   // createPendingOrder() succeeds, before the MP branch, so it fires
   // identically for the 201 JSON (PICKUP_CASH) and 303 redirect (MP) paths.
