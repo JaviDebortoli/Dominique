@@ -136,8 +136,12 @@ test.describe("Cart journey: PDP → /carrito → /checkout → empty cart (task
     // 8. Complete the order with PICKUP_CASH (simplest — no MercadoPago
     // sandbox needed).
     const contactSuffix = randomUUID().replace(/-/g, "").slice(0, 8);
+    // Phone must be digits-only (plus optional spaces/dashes/parens/+) per
+    // checkout-antiabuso's format validation — contactSuffix is hex and can
+    // contain a-f, so it derives the email but never the phone.
+    const phoneDigits = Date.now().toString().slice(-4);
     await page.getByLabel("Nombre").fill(`Cliente E2E ${suffix}`);
-    await page.getByLabel("Teléfono").fill(`381555${contactSuffix.slice(0, 4)}`);
+    await page.getByLabel("Teléfono").fill(`381555${phoneDigits}`);
     await page.getByLabel("Email").fill(`cliente-e2e-${contactSuffix}@example.com`);
     await page.getByRole("radio", { name: "Reservar y pagar al retirar" }).check();
     await page.getByRole("button", { name: "Confirmar pedido" }).click();
