@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { listAllProductsForAdmin } from "@/modules/catalog/product.service";
-import { ProductRow } from "./ProductRow";
+import { ProductTableBody } from "./ProductTableBody";
 
 interface AdminProductsPageProps {
   searchParams: Promise<{ categoria?: string }>;
@@ -60,34 +60,21 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
         </p>
       ) : null}
 
-      <table className="w-full border-collapse font-sans text-body-md text-ink">
-        <thead>
-          <tr className="border-b border-ink/20 text-left">
-            <th className="py-2">Producto</th>
-            <th className="py-2">Categoría</th>
-            <th className="py-2 text-right">Precio</th>
-            <th className="py-2 text-right">Variantes</th>
-            <th className="py-2 text-right">Imágenes</th>
-            <th className="py-2 text-right">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((product) => (
-            <ProductRow
-              key={product.id}
-              product={{ ...product, price: Number(product.price) }}
-              categories={categoryOptions}
-            />
-          ))}
-          {products.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="py-6 text-center text-outline">
-                Todavía no hay productos.
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse font-sans text-body-md text-ink">
+          <thead>
+            <tr className="border-b border-ink/20 text-left">
+              <th className="py-2">Producto</th>
+              <th className="py-2">Categoría</th>
+              <th className="py-2 text-right">Precio</th>
+              <th className="py-2 text-right">Variantes</th>
+              <th className="py-2 text-right">Imágenes</th>
+              <th className="py-2 text-right">Acciones</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <ProductTableBody products={products} categories={categoryOptions} />
+        </table>
+      </div>
     </section>
   );
 }

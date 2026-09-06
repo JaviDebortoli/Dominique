@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { createProduct } from "@/modules/catalog/product.service";
@@ -52,7 +53,12 @@ describe("Home page (integration, real Postgres)", () => {
     const layoutElement = await StoreLayout({ children: await Home() });
     render(layoutElement);
 
-    // Navigation shows the real category, linking to its category page.
+    // Category nav now lives in the header's top-right dropdown, collapsed
+    // by default — open it before asserting on its links.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Categorías/ }));
+
+    // Dropdown shows the real category, linking to its category page.
     const navLink = screen.getAllByRole("link", { name: category.name })[0];
     expect(navLink).toHaveAttribute("href", `/categoria/${category.slug}`);
 
@@ -65,7 +71,7 @@ describe("Home page (integration, real Postgres)", () => {
     });
     expect(within(productCard).getByText("$45.000")).toBeInTheDocument();
 
-    // Category entry point tile also links to the category page (nav + tile).
+    // Category entry point tile also links to the category page (dropdown + tile).
     const categoryLinks = screen.getAllByRole("link", { name: category.name });
     expect(categoryLinks.length).toBeGreaterThanOrEqual(2);
 

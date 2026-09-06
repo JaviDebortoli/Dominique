@@ -41,11 +41,27 @@ interface ProductRowProduct {
 interface ProductRowProps {
   product: ProductRowProduct;
   categories: { id: string; name: string }[];
+  /** Whether THIS row's edit form is the one currently open. Owned by the
+   * parent (ProductTableBody), not this component: with every row managing
+   * its own mode independently, staff could pop open edit forms on several
+   * products at once with no indication of which save applies to what.
+   * Lifting the flag up lets the parent enforce "opening one closes any
+   * other" (FIFO of 1). */
+  isEditing: boolean;
+  /** Ask the parent to make this row the open one. */
+  onEnterEdit: () => void;
+  /** Ask the parent to close this row (Cancelar, Escape, or a successful save). */
+  onExitEdit: () => void;
 }
 
-export function ProductRow({ product, categories }: ProductRowProps) {
+export function ProductRow({
+  product,
+  categories,
+  isEditing,
+  onEnterEdit,
+  onExitEdit,
+}: ProductRowProps) {
   const router = useRouter();
-  const [mode, setMode] = useState<"view" | "edit">("view");
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(product.name);
   const [price, setPrice] = useState(String(product.price));
@@ -60,7 +76,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
     setCategoryId(product.categoryId);
     setDescription(product.description ?? "");
     setErrorMessage(null);
-    setMode("edit");
+    onEnterEdit();
   }
 
   function cancelEdit() {
@@ -69,7 +85,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
     setCategoryId(product.categoryId);
     setDescription(product.description ?? "");
     setErrorMessage(null);
-    setMode("view");
+    onExitEdit();
   }
 
   async function handleSave() {
@@ -96,7 +112,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
       }
 
       setSubmitting(false);
-      setMode("view");
+      onExitEdit();
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Error inesperado.");
@@ -149,7 +165,7 @@ export function ProductRow({ product, categories }: ProductRowProps) {
   // report this fixes: variants/images "can't be edited" because they
   // silently disappeared the moment product-field editing started).
   const headerRow =
-    mode === "edit" ? (
+    isEditing ? (
       <tr className="border-b border-ink/10">
         <td colSpan={6} className="py-4">
           <form
@@ -214,14 +230,15 @@ export function ProductRow({ product, categories }: ProductRowProps) {
               <button
                 type="submit"
                 disabled={submitting}
-                className="font-sans text-label-caps uppercase tracking-widest text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                className="bg-nude px-6 py-2 font-sans text-label-caps uppercase tracking-widest text-ink hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Guardar
+                {submitting ? "Guardando…" : "Guardar"}
               </button>
               <button
                 type="button"
                 onClick={cancelEdit}
-                className="font-sans text-label-caps uppercase tracking-widest text-ink"
+                disabled={submitting}
+                className="border border-ink/20 px-6 py-2 font-sans text-label-caps uppercase tracking-widest text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cancelar
               </button>
