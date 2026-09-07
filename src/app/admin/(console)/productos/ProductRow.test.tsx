@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import type { ProductImage } from "@/generated/prisma/client";
 import { ProductRow } from "./ProductRow";
@@ -71,14 +72,30 @@ const categories = [
   { id: "cat-2", name: "Accesorios" },
 ];
 
-function renderRow(productOverrides: Partial<typeof product> = {}) {
-  return render(
+// ProductRow's edit-open flag is controlled by its parent (ProductTableBody
+// in production, coordinating exclusivity across rows). This harness plays
+// that parent's part with real state, so every existing assertion below
+// (Editar opens the form, Cancelar/Escape/save close it) still exercises
+// the real open/close behavior rather than a static prop.
+function SingleRowHarness({ productOverrides }: { productOverrides: Partial<typeof product> }) {
+  const [isEditing, setIsEditing] = useState(false);
+  return (
     <table>
       <tbody>
-        <ProductRow product={{ ...product, ...productOverrides }} categories={categories} />
+        <ProductRow
+          product={{ ...product, ...productOverrides }}
+          categories={categories}
+          isEditing={isEditing}
+          onEnterEdit={() => setIsEditing(true)}
+          onExitEdit={() => setIsEditing(false)}
+        />
       </tbody>
-    </table>,
+    </table>
   );
+}
+
+function renderRow(productOverrides: Partial<typeof product> = {}) {
+  return render(<SingleRowHarness productOverrides={productOverrides} />);
 }
 
 describe("ProductRow", () => {

@@ -12,6 +12,17 @@ test.describe("Home page (tasks.md 3.1)", () => {
   }) => {
     await page.goto("/");
 
+    // Category navigation now lives in a collapsed top-right dropdown
+    // (specs/storefront-browsing/spec.md "Header Category Navigation") — the
+    // links are out of the tree until the control is activated.
+    const categoryTrigger = page.getByRole("button", { name: /Categorías/ });
+    await expect(categoryTrigger).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      page.getByRole("navigation", { name: "Categorías" }),
+    ).toHaveCount(0);
+
+    await categoryTrigger.click();
+
     // Navigation — real categories, not mockup placeholders.
     await expect(
       page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Vestidos" }),
@@ -22,6 +33,14 @@ test.describe("Home page (tasks.md 3.1)", () => {
     await expect(
       page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Accesorios" }),
     ).toBeVisible();
+
+    // Selecting a category navigates to its page and collapses the control.
+    await page
+      .getByRole("navigation", { name: "Categorías" })
+      .getByRole("link", { name: "Vestidos" })
+      .click();
+    await expect(page).toHaveURL(/\/categoria\/vestidos$/);
+    await page.goto("/");
 
     // Curated products section.
     await expect(page.getByRole("heading", { name: "Selección Dominique" })).toBeVisible();

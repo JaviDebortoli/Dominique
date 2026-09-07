@@ -23,7 +23,10 @@ export default async function AdminConsoleLayout({ children }: { children: React
         <div className="flex items-center gap-4 font-sans text-body-md text-ink">
           {session?.user?.email ? <span className="text-outline">{session.user.email}</span> : null}
           <form action={signOutAction}>
-            <button type="submit" className="underline underline-offset-2">
+            <button
+              type="submit"
+              className="border border-ink/20 px-3 py-1 font-sans text-label-caps uppercase tracking-widest text-ink hover:bg-surface"
+            >
               Salir
             </button>
           </form>

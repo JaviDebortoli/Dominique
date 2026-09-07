@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Header } from "./Header";
 
 // Backs specs/storefront-browsing/spec.md "Header Cart Entry Point":
@@ -31,12 +32,19 @@ describe("Header", () => {
     expect(cartLink).toHaveTextContent("3");
   });
 
-  it("still renders the category navigation alongside the cart entry point", () => {
+  it("exposes the category navigation via the top-right dropdown, alongside the cart entry point", async () => {
+    const user = userEvent.setup();
     render(<Header categories={categories} cartCount={2} />);
+
+    await user.click(screen.getByRole("button", { name: /Categorías/ }));
 
     expect(screen.getByRole("link", { name: "Vestidos" })).toHaveAttribute(
       "href",
       "/categoria/vestidos",
+    );
+    expect(screen.getByRole("link", { name: "Carrito, 2 artículos" })).toHaveAttribute(
+      "href",
+      "/carrito",
     );
   });
 });

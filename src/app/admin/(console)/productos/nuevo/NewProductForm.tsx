@@ -233,6 +233,7 @@ export function NewProductForm({ categories }: { categories: Category[] }) {
           accept="image/jpeg,image/png,image/webp"
           multiple
           onChange={(e) => setImages(Array.from(e.target.files ?? []))}
+          className="font-sans text-body-md text-ink file:mr-4 file:border file:border-ink/20 file:bg-paper file:px-4 file:py-2 file:font-sans file:text-label-caps file:uppercase file:tracking-widest file:text-ink hover:file:bg-surface"
         />
       </label>
 

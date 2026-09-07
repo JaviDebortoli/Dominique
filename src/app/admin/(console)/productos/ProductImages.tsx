@@ -144,6 +144,7 @@ export function ProductImages({ productId, images }: ProductImagesProps) {
                 accept="image/jpeg,image/png,image/webp"
                 disabled={atCap || uploading}
                 onChange={(e) => void handleFileChange(e)}
+                className="font-sans text-body-sm text-ink file:mr-4 file:border file:border-ink/20 file:bg-paper file:px-3 file:py-1 file:font-sans file:text-label-caps file:uppercase file:tracking-widest file:text-ink hover:file:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
               />
             </label>
           </div>

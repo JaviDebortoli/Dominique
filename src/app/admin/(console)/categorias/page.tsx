@@ -20,28 +20,30 @@ export default async function AdminCategoriasPage() {
       <div className="flex flex-col gap-4">
         <h1 className="font-serif text-headline-md text-ink">Categorías</h1>
 
-        <table className="w-full border-collapse font-sans text-body-md text-ink">
-          <thead>
-            <tr className="border-b border-ink/20 text-left">
-              <th className="py-2">Categoría</th>
-              <th className="py-2">Slug</th>
-              <th className="py-2 text-right">Productos</th>
-              <th className="py-2 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {categories.map((category) => (
-              <CategoryRow key={category.id} category={category} />
-            ))}
-            {categories.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="py-6 text-center text-outline">
-                  Todavía no hay categorías. Creá la primera acá abajo.
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse font-sans text-body-md text-ink">
+            <thead>
+              <tr className="border-b border-ink/20 text-left">
+                <th className="py-2">Categoría</th>
+                <th className="py-2">Slug</th>
+                <th className="py-2 text-right">Productos</th>
+                <th className="py-2 text-right">Acciones</th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {categories.map((category) => (
+                <CategoryRow key={category.id} category={category} />
+              ))}
+              {categories.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-6 text-center text-outline">
+                    Todavía no hay categorías. Creá la primera acá abajo.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="flex flex-col gap-4">
