@@ -188,6 +188,26 @@ describe("resolveCartLines", () => {
     expect(withoutImage.thumbnailAlt).toBeNull();
   });
 
+  // design.md Threat Matrix — "Client-side stock cap bypass": qty is never
+  // clamped inside the cart cookie itself (cart.ts's updateQty accepts any
+  // finite positive number, tasks.md 4.1). This proves a hand-crafted 1e9
+  // quantity survives to resolveCartLines unclamped without throwing, and
+  // is merely FLAGGED (exceedsStock/maxSelectable) — the courtesy layer,
+  // never the authority. POST /api/checkout's StockUnavailableError gate
+  // (route.test.ts) remains the actual rejection point.
+  it("flags exceedsStock for an absurdly large hand-crafted qty (1e9) without throwing, clamping only the display maximum", async () => {
+    const cart: Cart = [{ variantId: "v-1", qty: 1e9 }];
+    const db = stubDb([makeVariant({ id: "v-1", onHand: 5, held: 0, productPrice: 10000 })]);
+
+    const result = await resolveCartLines(db, cart);
+
+    const [line] = result.lines;
+    expect(line.qty).toBe(1e9);
+    expect(line.maxSelectable).toBe(5);
+    expect(line.exceedsStock).toBe(true);
+    expect(result.hasBlockingLines).toBe(true);
+  });
+
   it("returns an empty result for an empty cart without querying variants unnecessarily", async () => {
     const db = stubDb([]);
 
