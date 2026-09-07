@@ -121,14 +121,14 @@ describe("CheckoutForm", () => {
     );
   });
 
-  it("shows the stock_unavailable error message returned by the API without creating a fake success", async () => {
+  it("shows the generic body.message when no returned variantId matches a known line", async () => {
     const user = userEvent.setup();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 409,
       json: async () => ({
         error: "stock_unavailable",
-        variantIds: ["v1"],
+        variantIds: ["v-unknown"],
         message: "Alguno de los talles seleccionados ya no está disponible.",
       }),
     });
@@ -143,6 +143,42 @@ describe("CheckoutForm", () => {
     expect(
       await screen.findByText(/ya no está disponible/i),
     ).toBeInTheDocument();
+  });
+
+  // tasks.md 3.2, design.md's CheckoutForm 409 mapping — the route already
+  // returns StockUnavailableError.variantIds; the client maps those ids to
+  // their line labels (from the items prop it already holds) so the error
+  // names the specific affected item(s) instead of only generic copy.
+  it("names the specific affected line(s) when a returned variantId matches a known line", async () => {
+    const user = userEvent.setup();
+    const multiLineItems: CheckoutFormItem[] = [
+      { variantId: "v1", label: "Vestido Roma — Talle M", qty: 1, unitPrice: 45000 },
+      { variantId: "v2", label: "Campera Azul — Talle U", qty: 1, unitPrice: 30000 },
+    ];
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "stock_unavailable",
+        variantIds: ["v1"],
+        message: "Alguno de los talles seleccionados ya no está disponible.",
+      }),
+    });
+
+    render(<CheckoutForm items={multiLineItems} />);
+    await user.type(screen.getByLabelText(/nombre/i), "Ana Pérez");
+    await user.type(screen.getByLabelText(/tel[eé]fono/i), "3815551234");
+    await user.type(screen.getByLabelText(/email/i), "ana@example.com");
+    await user.click(screen.getByRole("radio", { name: /pagar con mercadopago/i }));
+    await user.click(screen.getByRole("button", { name: /confirmar pedido/i }));
+
+    expect(await screen.findByText("Vestido Roma — Talle M")).toBeInTheDocument();
+    expect(screen.queryByText("Campera Azul — Talle U")).not.toBeInTheDocument();
+    expect(screen.queryByText(/alguno de los talles/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /ajustar el carrito/i })).toHaveAttribute(
+      "href",
+      "/carrito",
+    );
   });
 
   // tasks.md 1.4 — invalid_contact (400) uses the same generic body.message

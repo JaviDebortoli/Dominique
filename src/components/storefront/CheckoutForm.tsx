@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatPriceARS } from "@/lib/format-price";
 
 // Backs specs/cart-checkout/spec.md:
@@ -26,7 +27,7 @@ type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "success"; publicCode: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; conflictedLabels?: string[] };
 
 export function CheckoutForm({ items }: CheckoutFormProps) {
   const [buyerName, setBuyerName] = useState("");
@@ -69,12 +70,26 @@ export function CheckoutForm({ items }: CheckoutFormProps) {
       const body = await response.json();
 
       if (!response.ok) {
+        // tasks.md 3.2, design.md's CheckoutForm 409 mapping — the route
+        // already returns StockUnavailableError.variantIds on a stock
+        // conflict; map those ids to their line labels (already held in
+        // `items`) so the error names the specific affected item(s).
+        // Unresolved ids fall back to body.message verbatim — never
+        // fabricate a name.
+        const ids = Array.isArray(body.variantIds)
+          ? body.variantIds.filter((v: unknown): v is string => typeof v === "string")
+          : [];
+        const conflictedLabels = items
+          .filter((item) => ids.includes(item.variantId))
+          .map((item) => item.label);
+
         setState({
           status: "error",
           message:
             typeof body.message === "string"
               ? body.message
               : "No pudimos confirmar tu pedido. Intentá de nuevo.",
+          conflictedLabels: conflictedLabels.length > 0 ? conflictedLabels : undefined,
         });
         return;
       }
@@ -173,7 +188,19 @@ export function CheckoutForm({ items }: CheckoutFormProps) {
         </label>
       </fieldset>
 
-      {state.status === "error" ? (
+      {state.status === "error" && state.conflictedLabels ? (
+        <div role="alert" className="flex flex-col gap-2 font-sans text-body-md text-red-700">
+          <p>Sin stock suficiente para:</p>
+          <ul className="list-disc pl-5">
+            {state.conflictedLabels.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+          <Link href="/carrito" className="underline">
+            Ajustar el carrito
+          </Link>
+        </div>
+      ) : state.status === "error" ? (
         <p role="alert" className="font-sans text-body-md text-red-700">
           {state.message}
         </p>
