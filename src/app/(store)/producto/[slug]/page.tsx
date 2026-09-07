@@ -4,7 +4,7 @@ import { getProductBySlug } from "@/modules/catalog/product.service";
 import { summarizeVariantAvailability } from "@/modules/catalog/variant-availability";
 import { formatPriceARS } from "@/lib/format-price";
 import { SizeSelector } from "@/components/storefront/SizeSelector";
-import { addOneToCart } from "@/modules/cart/cart-cookie";
+import { addOneToCart, getCart } from "@/modules/cart/cart-cookie";
 
 // Product Detail Page. Backs specs/storefront-browsing/spec.md:
 //   - "Product Detail Page Variant Selector" (enable in-stock, disable
@@ -13,6 +13,10 @@ import { addOneToCart } from "@/modules/cart/cart-cookie";
 // Reads Prisma/services directly (design.md D1); per-variant availability
 // is computed via the Phase 2 pure-function helper (variant-availability.ts)
 // so the "available = onHand - held" formula lives in exactly one place.
+//
+// DA-1 (design.md, confirmed by owner): no quantity input on the PDP.
+// `inCartQty` supplies SizeSelector's at-cap disable — how many units of
+// each variant this shopper already holds in the cart cookie.
 export default async function ProductPage({
   params,
 }: {
@@ -33,6 +37,9 @@ export default async function ProductPage({
       isAvailable: variant.isAvailable,
     }),
   );
+
+  const cart = await getCart();
+  const inCartQty = Object.fromEntries(cart.map((item) => [item.variantId, item.qty]));
 
   const primaryImage = product.images[0];
 
@@ -61,7 +68,7 @@ export default async function ProductPage({
             {product.description}
           </p>
         ) : null}
-        <SizeSelector variants={variantOptions} onAddToCart={addOneToCart} />
+        <SizeSelector variants={variantOptions} onAddToCart={addOneToCart} inCartQty={inCartQty} />
       </div>
     </section>
   );

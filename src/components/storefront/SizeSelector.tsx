@@ -10,6 +10,12 @@ import { useState } from "react";
 // variant). This component is presentation-only: it owns selection state
 // and exposes the chosen variant id via onAddToCart — actually adding it to
 // a cart is Phase 4 (src/modules/cart/*), not wired here.
+//
+// DA-1 (design.md, confirmed by owner): no quantity input on the PDP.
+// "Agregar al carrito" always adds exactly 1 unit. The cap against a
+// variant's available stock is enforced as a disable-with-named-reason —
+// once `inCartQty[selected.id]` already reaches `selected.available`, the
+// button disables and its label names why instead of silently no-op'ing.
 
 export interface SizeOption {
   id: string;
@@ -21,12 +27,17 @@ export interface SizeOption {
 export interface SizeSelectorProps {
   variants: SizeOption[];
   onAddToCart?: (variantId: string) => void;
+  /** variantId -> qty already in the cart, read server-side from the cart
+   * cookie (producto/[slug]/page.tsx). Absent entries count as 0. */
+  inCartQty?: Record<string, number>;
 }
 
-export function SizeSelector({ variants, onAddToCart }: SizeSelectorProps) {
+export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSelectorProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = variants.find((variant) => variant.id === selectedId) ?? null;
-  const canAddToCart = selected !== null && selected.isAvailable;
+  const atCap = selected !== null && (inCartQty[selected.id] ?? 0) >= selected.available;
+  const canAddToCart =
+    selected !== null && selected.isAvailable && (inCartQty[selected.id] ?? 0) < selected.available;
 
   return (
     <div className="flex flex-col gap-4">
@@ -71,7 +82,7 @@ export function SizeSelector({ variants, onAddToCart }: SizeSelectorProps) {
             : "cursor-not-allowed bg-surface-container text-outline",
         ].join(" ")}
       >
-        Agregar al carrito
+        {atCap ? "Ya tenés el máximo disponible" : "Agregar al carrito"}
       </button>
     </div>
   );

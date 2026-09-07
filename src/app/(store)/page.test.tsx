@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { createProduct } from "@/modules/catalog/product.service";
 import StoreLayout from "./layout";
@@ -11,7 +12,13 @@ import Home from "./page";
 //   category entry points matching the mockup" (ejemplo/code.html).
 // Integration test against real Postgres (design.md Testing Strategy) since
 // both Home and StoreLayout are RSCs that read Prisma/services directly
-// (design.md D1).
+// (design.md D1). `next/headers`'s `cookies()` is mocked because StoreLayout
+// now reads the cart cookie for the header's item-count badge (2.2), and
+// `cookies()` only resolves inside a real Next.js request/render — mirrors
+// carrito/page.test.tsx's and producto/[slug]/page.test.tsx's pattern.
+vi.mock("next/headers", () => ({ cookies: vi.fn() }));
+const mockedCookies = vi.mocked(cookies);
+
 describe("Home page (integration, real Postgres)", () => {
   const createdProductIds: string[] = [];
   const createdCategoryIds: string[] = [];
@@ -22,6 +29,10 @@ describe("Home page (integration, real Postgres)", () => {
   });
 
   it("renders navigation, curated products, and category entry points", async () => {
+    mockedCookies.mockResolvedValue({
+      get: () => undefined,
+    } as unknown as Awaited<ReturnType<typeof cookies>>);
+
     const suffix = randomUUID();
     const category = await prisma.category.create({
       data: { name: `Vestidos Home ${suffix}`, slug: `vestidos-home-${suffix}` },

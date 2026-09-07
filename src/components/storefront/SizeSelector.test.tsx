@@ -66,4 +66,44 @@ describe("SizeSelector", () => {
 
     expect(onAddToCart).toHaveBeenCalledWith("v-l");
   });
+
+  // DA-1 (design.md, confirmed by owner): no quantity input on the PDP.
+  // "Agregar al carrito" always adds exactly 1 unit; the cap against
+  // available stock is enforced as a disable-with-named-reason once the
+  // shopper already holds `available` units of that variant in the cart.
+  it("disables add to cart with the named at-cap reason when inCartQty already reaches available stock", async () => {
+    const user = userEvent.setup();
+    render(<SizeSelector variants={variants} inCartQty={{ "v-s": 3 }} />);
+
+    await user.click(screen.getByRole("button", { name: "S" }));
+
+    const addToCart = screen.getByRole("button", {
+      name: "Ya tenés el máximo disponible",
+    });
+    expect(addToCart).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^agregar al carrito$/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the normal enabled label when inCartQty is below available stock", async () => {
+    const user = userEvent.setup();
+    const onAddToCart = vi.fn();
+    render(<SizeSelector variants={variants} inCartQty={{ "v-s": 1 }} onAddToCart={onAddToCart} />);
+
+    await user.click(screen.getByRole("button", { name: "S" }));
+
+    const addToCart = screen.getByRole("button", { name: /^agregar al carrito$/i });
+    expect(addToCart).toBeEnabled();
+
+    await user.click(addToCart);
+    expect(onAddToCart).toHaveBeenCalledWith("v-s");
+  });
+
+  it("treats a variant absent from inCartQty as zero units already in the cart", async () => {
+    const user = userEvent.setup();
+    render(<SizeSelector variants={variants} inCartQty={{}} />);
+
+    await user.click(screen.getByRole("button", { name: "S" }));
+
+    expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
+  });
 });
