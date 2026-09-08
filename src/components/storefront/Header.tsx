@@ -29,12 +29,37 @@ export function Header({ categories, cartCount }: HeaderProps) {
       </div>
       <header className="sticky top-0 z-50 w-full border-b border-ink bg-surface">
         <div className="relative mx-auto flex w-full max-w-container flex-wrap items-center justify-between gap-y-2 px-margin-mobile py-4 md:flex-nowrap md:justify-center md:px-gutter">
-          <Link
-            href="/"
-            className="font-serif text-headline-lg-mobile uppercase tracking-widest text-ink md:text-headline-lg"
-          >
-            Dominique
-          </Link>
+          <div className="flex items-center gap-3">
+            {/* Circular "D" emblem, pinned to the left margin — mirrors the
+                right-side cluster. Sits beside the wordmark in normal flow
+                below md; absolute-anchored to the header's left edge at md
+                and up, leaving the wordmark centered on its own. alt=""
+                (decorative): the emblem's own arced "DOMINIQUE / TALLES
+                REALES" micro-text is illegible at this size by design. Its
+                home link carries a distinct accessible name so it doesn't
+                collide with the wordmark's "Dominique" link. */}
+            <Link
+              href="/"
+              aria-label="Página de inicio"
+              className="flex shrink-0 items-center md:absolute md:left-gutter md:top-1/2 md:-translate-y-1/2"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/logo.svg"
+                alt=""
+                width={1536}
+                height={1503}
+                className="h-11 w-auto md:h-14"
+              />
+            </Link>
+
+            <Link
+              href="/"
+              className="font-serif text-headline-lg-mobile uppercase tracking-widest text-ink md:text-headline-lg"
+            >
+              Dominique
+            </Link>
+          </div>
           {/* Below md the cluster stays in normal flow (design.md "Resolved:
               Mobile Header Layout") so it can never overlap the centered
               wordmark at ~320px; flex-wrap drops it to its own row when the

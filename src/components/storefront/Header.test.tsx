@@ -16,6 +16,17 @@ import { Header } from "./Header";
 describe("Header", () => {
   const categories = [{ id: "c1", name: "Vestidos", slug: "vestidos" }];
 
+  it("links both the left-margin emblem and the wordmark to the home page", () => {
+    render(<Header categories={categories} cartCount={0} />);
+
+    const wordmark = screen.getByRole("link", { name: "Dominique" });
+    expect(wordmark).toHaveAttribute("href", "/");
+
+    const emblem = screen.getByRole("link", { name: "Página de inicio" });
+    expect(emblem).toHaveAttribute("href", "/");
+    expect(emblem.querySelector("img")).toHaveAttribute("src", "/brand/logo.svg");
+  });
+
   it("keeps the cart icon persistent and hides the numeric count when the cart is empty", () => {
     render(<Header categories={categories} cartCount={0} />);
 
