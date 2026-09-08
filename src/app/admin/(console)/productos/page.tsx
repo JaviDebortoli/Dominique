@@ -11,7 +11,10 @@
 // (design.md D1).
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { listAllProductsForAdmin } from "@/modules/catalog/product.service";
+import {
+  listAllProductsForAdmin,
+  type SerializableAdminProductRow,
+} from "@/modules/catalog/product.service";
 import { ProductTableBody } from "./ProductTableBody";
 
 interface AdminProductsPageProps {
@@ -26,7 +29,19 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   // against does not handle concurrent queries from one PrismaClient
   // reliably (this session's own "Connection terminated unexpectedly"
   // flake under Promise.all here).
-  const products = await listAllProductsForAdmin(prisma, { categoryId: categoria });
+  // Flatten every Prisma `Decimal` to a number HERE, on the server, before
+  // the list crosses into the client `ProductTableBody` — React cannot
+  // serialize `Decimal` class instances across that boundary ("Only plain
+  // objects can be passed to Client Components").
+  const productRows = await listAllProductsForAdmin(prisma, { categoryId: categoria });
+  const products: SerializableAdminProductRow[] = productRows.map((product) => ({
+    ...product,
+    price: Number(product.price),
+    variants: product.variants.map((variant) => ({
+      ...variant,
+      priceOverride: variant.priceOverride === null ? null : Number(variant.priceOverride),
+    })),
+  }));
   const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
   const categoryOptions = categories.map((category) => ({
     id: category.id,
@@ -60,16 +75,16 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
         </p>
       ) : null}
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto border border-ink/15">
         <table className="w-full border-collapse font-sans text-body-md text-ink">
           <thead>
-            <tr className="border-b border-ink/20 text-left">
-              <th className="py-2">Producto</th>
-              <th className="py-2">Categoría</th>
-              <th className="py-2 text-right">Precio</th>
-              <th className="py-2 text-right">Variantes</th>
-              <th className="py-2 text-right">Imágenes</th>
-              <th className="py-2 text-right">Acciones</th>
+            <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
+              <th className="px-4 py-3 font-semibold">Producto</th>
+              <th className="px-4 py-3 font-semibold">Categoría</th>
+              <th className="px-4 py-3 text-right font-semibold">Precio</th>
+              <th className="px-4 py-3 text-center font-semibold">Variantes</th>
+              <th className="px-4 py-3 text-center font-semibold">Imágenes</th>
+              <th className="px-4 py-3 text-right font-semibold">Acciones</th>
             </tr>
           </thead>
           <ProductTableBody products={products} categories={categoryOptions} />

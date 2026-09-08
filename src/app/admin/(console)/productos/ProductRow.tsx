@@ -21,7 +21,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { formatPriceARS } from "@/lib/format-price";
-import type { Category, ProductImage, Variant } from "@/generated/prisma/client";
+import type { Category, ProductImage } from "@/generated/prisma/client";
+import type { SerializableVariant } from "@/modules/catalog/product.service";
 import { AddVariantForm } from "./AddVariantForm";
 import { ProductImages } from "./ProductImages";
 import { VariantRow } from "./VariantRow";
@@ -34,7 +35,7 @@ interface ProductRowProduct {
   price: number;
   categoryId: string;
   category: Category;
-  variants: Variant[];
+  variants: SerializableVariant[];
   images: ProductImage[];
 }
 
@@ -167,7 +168,7 @@ export function ProductRow({
   const headerRow =
     isEditing ? (
       <tr className="border-b border-ink/10">
-        <td colSpan={6} className="py-4">
+        <td colSpan={6} className="px-4 py-4">
           <form
             onSubmit={handleSubmit}
             onKeyDown={handleFormKeyDown}
@@ -247,11 +248,11 @@ export function ProductRow({
         </td>
       </tr>
     ) : (
-      <tr className="border-b border-ink/10">
-        <td className="py-2">{product.name}</td>
-        <td className="py-2">{product.category.name}</td>
-        <td className="py-2 text-right">{formatPriceARS(product.price)}</td>
-        <td className="py-2 text-right">
+      <tr className="divide-x divide-ink/10 border-b border-ink/10 align-middle hover:bg-surface">
+        <td className="px-4 py-3 font-medium">{product.name}</td>
+        <td className="px-4 py-3 text-on-surface-variant">{product.category.name}</td>
+        <td className="px-4 py-3 text-right tabular-nums">{formatPriceARS(product.price)}</td>
+        <td className="px-4 py-3 text-center tabular-nums">
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
@@ -260,14 +261,14 @@ export function ProductRow({
             {product.variants.length}
           </button>
         </td>
-        <td className="py-2 text-right">
+        <td className="px-4 py-3 text-center tabular-nums">
           {product.images.length === 0 ? (
             <span className="text-red-700">Sin imágenes</span>
           ) : (
             product.images.length
           )}
         </td>
-        <td className="py-2 text-right">
+        <td className="px-4 py-3 text-right">
           <div className="flex flex-col items-end gap-1">
             <div className="flex justify-end gap-4">
               <button

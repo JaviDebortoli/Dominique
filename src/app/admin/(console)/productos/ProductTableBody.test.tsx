@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Product } from "@/generated/prisma/client";
 import { ProductTableBody } from "./ProductTableBody";
 
 // Backs the request: opening "Editar" on a second product while a first
@@ -20,7 +19,7 @@ function buildProduct(id: string, name: string) {
     name,
     slug: name.toLowerCase().replace(/\s+/g, "-"),
     description: null,
-    price: 10000 as unknown as Product["price"],
+    price: 10000,
     categoryId: "cat-1",
     category: {
       id: "cat-1",

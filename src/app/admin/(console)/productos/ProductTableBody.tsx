@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { AdminProductRow } from "@/modules/catalog/product.service";
+import type { SerializableAdminProductRow } from "@/modules/catalog/product.service";
 import { ProductRow } from "./ProductRow";
 
 interface ProductTableBodyProps {
-  products: AdminProductRow[];
+  // Decimal fields already flattened to numbers by the Server Component
+  // (productos/page.tsx) so this prop is safe to pass across the boundary.
+  products: SerializableAdminProductRow[];
   categories: { id: string; name: string }[];
 }
 
@@ -22,7 +24,7 @@ export function ProductTableBody({ products, categories }: ProductTableBodyProps
       {products.map((product) => (
         <ProductRow
           key={product.id}
-          product={{ ...product, price: Number(product.price) }}
+          product={product}
           categories={categories}
           isEditing={editingProductId === product.id}
           onEnterEdit={() => setEditingProductId(product.id)}
@@ -33,7 +35,7 @@ export function ProductTableBody({ products, categories }: ProductTableBodyProps
       ))}
       {products.length === 0 ? (
         <tr>
-          <td colSpan={6} className="py-6 text-center text-outline">
+          <td colSpan={6} className="px-4 py-8 text-center text-outline">
             Todavía no hay productos.
           </td>
         </tr>

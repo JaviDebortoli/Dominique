@@ -591,6 +591,23 @@ export type AdminProductRow = Product & {
   images: ProductImage[];
 };
 
+/** A `Variant` with its Prisma `Decimal` `priceOverride` flattened to a
+ * plain number — safe to pass across the RSC -> Client Component boundary
+ * (React can serialize numbers and `Date`, not `Decimal` class instances). */
+export type SerializableVariant = Omit<Variant, "priceOverride"> & {
+  priceOverride: number | null;
+};
+
+/** `AdminProductRow` with every Prisma `Decimal` (`price`, and each
+ * variant's `priceOverride`) flattened to a number, so `/admin/productos`'s
+ * Server Component can hand the list to the client `ProductTableBody`
+ * without React's "Only plain objects can be passed to Client Components"
+ * serialization error. `page.tsx` maps the query result to this. */
+export type SerializableAdminProductRow = Omit<AdminProductRow, "price" | "variants"> & {
+  price: number;
+  variants: SerializableVariant[];
+};
+
 export interface ListAllProductsForAdminFilter {
   categoryId?: string;
 }

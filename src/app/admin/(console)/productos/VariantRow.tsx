@@ -17,11 +17,11 @@
 // design.md's UI Shape, not a peer row.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { Variant } from "@/generated/prisma/client";
+import type { SerializableVariant } from "@/modules/catalog/product.service";
 
 interface VariantRowProps {
   productId: string;
-  variant: Variant;
+  variant: SerializableVariant;
 }
 
 export function VariantRow({ productId, variant }: VariantRowProps) {
