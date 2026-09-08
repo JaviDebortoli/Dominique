@@ -7,9 +7,11 @@
 //
 // Slug auto-follows `name` through toSlug() (src/lib/slugify.ts — the SAME
 // pure function the server route validates against, design.md C1) until
-// the owner hand-edits the slug field, tracked by `slugTouched`. The live
-// `/categoria/{slug}` preview shows the actual consequence of the field,
-// since a wrong slug is the real failure mode this form guards against.
+// the owner hand-edits the slug field, tracked by `slugTouched`. Clearing
+// the slug field flips `slugTouched` back off so auto-fill resumes (same
+// rule as NewProductForm's SKU/slug fields). The live `/categoria/{slug}`
+// preview shows the actual consequence of the field, since a wrong slug is
+// the real failure mode this form guards against.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toSlug } from "@/lib/slugify";
@@ -30,7 +32,7 @@ export function NewCategoryForm() {
   }
 
   function handleSlugChange(value: string) {
-    setSlugTouched(true);
+    setSlugTouched(value.trim().length > 0);
     setSlug(value);
   }
 
