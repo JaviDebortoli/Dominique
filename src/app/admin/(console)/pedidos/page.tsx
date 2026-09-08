@@ -25,6 +25,25 @@ const STATUS_LABELS_ES_AR: Record<OrderStatus, string> = {
 
 const PICKUP_ELIGIBLE: OrderStatus[] = ["PAID", "RESERVED"];
 
+// `Order.phone` is stored as the buyer typed it (trimmed) — digits plus
+// visual separators the checkout allows (space, (), +, ., -). Strip
+// everything but digits and a leading + for the tel: URI; the cell still
+// shows the original string.
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+// One prep line for the Ítems cell: "2× Vestido Roma · S / Negro · VEST-S-NEG".
+// Everything staff need to pick the order off the shelf, in one text node.
+type OrderLineInput = {
+  qty: number;
+  variant: { size: string; color: string; sku: string; product: { name: string } };
+};
+function formatOrderLine(item: OrderLineInput): string {
+  const { qty, variant } = item;
+  return `${qty}× ${variant.product.name} · ${variant.size} / ${variant.color} · ${variant.sku}`;
+}
+
 // proposal 2026-08-18-admin-cancelar-pedido — cancel is offered only before
 // any payment has committed or reserved-unpaid stock has been picked up;
 // PAID stays out of scope (staff refund manually via MercadoPago).
@@ -34,7 +53,11 @@ export default async function AdminOrdersPage() {
   const orders = await prisma.order.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { items: true },
+    include: {
+      items: {
+        include: { variant: { include: { product: { select: { name: true } } } } },
+      },
+    },
   });
 
   return (
@@ -63,13 +86,30 @@ export default async function AdminOrdersPage() {
                 <td className="px-4 py-3">
                   {order.buyerName}
                   <div className="text-label-caps text-outline">{order.email}</div>
+                  <div className="text-label-caps text-outline">
+                    Teléfono:{" "}
+                    <a href={telHref(order.phone)} className="underline hover:text-ink">
+                      {order.phone}
+                    </a>
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   {order.method === "MP" ? "MercadoPago" : "Retiro en local"}
                 </td>
                 <td className="px-4 py-3">{STATUS_LABELS_ES_AR[order.status]}</td>
-                <td className="px-4 py-3 text-center tabular-nums">
-                  {order.items.reduce((sum, item) => sum + item.qty, 0)}
+                <td className="px-4 py-3 align-top">
+                  <details className="group">
+                    <summary className="cursor-pointer list-none text-center tabular-nums marker:content-none">
+                      {order.items.reduce((sum, item) => sum + item.qty, 0)}
+                      <span className="ml-1 text-outline group-open:hidden">▸</span>
+                      <span className="ml-1 text-outline hidden group-open:inline">▾</span>
+                    </summary>
+                    <ul className="mt-2 flex flex-col gap-1 text-body-sm text-ink">
+                      {order.items.map((item) => (
+                        <li key={item.id}>{formatOrderLine(item)}</li>
+                      ))}
+                    </ul>
+                  </details>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col items-end gap-2">

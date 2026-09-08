@@ -117,4 +117,27 @@ describe("/admin/pedidos — cancel affordance visibility (integration, real Pos
       expect(row.queryByRole("button", { name: "Marcar retirado" })).not.toBeInTheDocument();
     },
   );
+
+  // Pickup-only store: staff coordinate pickup by phone, so the buyer's
+  // phone must be reachable from the orders list (the only admin view of an
+  // order — there is no detail page). makeOrderWithStatus() seeds
+  // phone "3815550099".
+  it("shows the buyer phone as a tel: link in the Comprador cell", async () => {
+    const row = await renderRowFor("PENDING_PAYMENT");
+    const phoneLink = row.getByRole("link", { name: "3815550099" });
+    expect(phoneLink).toHaveAttribute("href", "tel:3815550099");
+  });
+
+  // Same "no detail page" reason: staff must see WHICH products to prepare
+  // for pickup straight from the list. makeOrderWithStatus() seeds one line
+  // — 1x "Producto Visibility <suffix>", variant U / Unico, sku VIS-<suffix>.
+  it("itemizes each purchased product (name, talle/color, SKU) in the Ítems cell", async () => {
+    const order = await makeOrderWithStatus("PAID");
+    render(await AdminOrdersPage());
+    const row = within(screen.getByText(order.publicCode).closest("tr") as HTMLElement);
+
+    expect(
+      row.getByText(/1× Producto Visibility .+ · U \/ Unico · VIS-/),
+    ).toBeInTheDocument();
+  });
 });
