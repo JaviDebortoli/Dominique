@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getProductBySlug } from "@/modules/catalog/product.service";
 import { summarizeVariantAvailability } from "@/modules/catalog/variant-availability";
 import { formatPriceARS } from "@/lib/format-price";
+import { ProductGallery } from "@/components/storefront/ProductGallery";
 import { SizeSelector } from "@/components/storefront/SizeSelector";
 import { addOneToCart, getCart } from "@/modules/cart/cart-cookie";
 
@@ -41,21 +42,12 @@ export default async function ProductPage({
   const cart = await getCart();
   const inCartQty = Object.fromEntries(cart.map((item) => [item.variantId, item.qty]));
 
-  const primaryImage = product.images[0];
-
   return (
     <section className="mx-auto grid max-w-container grid-cols-1 gap-gutter px-margin-mobile py-section md:grid-cols-2 md:px-gutter">
-      <div className="aspect-[1/1.5] overflow-hidden border border-ink/10 bg-surface-container">
-        {primaryImage ? (
-          // Admin-uploaded local files (design.md D8), not a remote domain.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={primaryImage.url}
-            alt={primaryImage.altText ?? product.name}
-            className="h-full w-full object-cover"
-          />
-        ) : null}
-      </div>
+      <ProductGallery
+        images={product.images.map((image) => ({ url: image.url, altText: image.altText }))}
+        productName={product.name}
+      />
       <div className="flex flex-col gap-6">
         <h1 className="font-serif text-headline-lg-mobile text-ink md:text-headline-lg">
           {product.name}

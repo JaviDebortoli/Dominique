@@ -42,6 +42,32 @@ The PDP MUST show a size/color selector reflecting real-time per-variant stock.
 - WHEN a customer views the size selector
 - THEN size S MUST be visually disabled and MUST NOT be selectable for purchase
 
+### Requirement: Product Detail Page Image Gallery
+
+The PDP MUST show every image the product has, in the order the admin set (`ProductImage.position` ascending; index 0 is the cover). One image renders large; when the product has two or more images a thumbnail strip MUST appear, and selecting a thumbnail MUST swap the large image without a page navigation. A product with no images MUST render a neutral placeholder in the image area, never a broken image.
+
+#### Scenario: Product with several images
+
+- GIVEN a product has three images ordered by the admin
+- WHEN a customer opens the PDP
+- THEN the first image (position 0) MUST render large
+- AND a thumbnail MUST be shown for each of the three images
+- WHEN the customer selects the third thumbnail
+- THEN the large image MUST switch to the third image with no page reload
+
+#### Scenario: Product with a single image
+
+- GIVEN a product has exactly one image
+- WHEN a customer opens the PDP
+- THEN that image MUST render large
+- AND no thumbnail strip MUST be shown
+
+#### Scenario: Product with no images
+
+- GIVEN a product has zero images
+- WHEN a customer opens the PDP
+- THEN the image area MUST show a neutral placeholder and MUST NOT show a broken image
+
 ### Requirement: Locale and Copy
 
 All customer-facing text MUST be in Spanish (es-AR).
