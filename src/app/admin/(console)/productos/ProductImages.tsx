@@ -33,6 +33,36 @@ export function ProductImages({ productId, images }: ProductImagesProps) {
   const [uploading, setUploading] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
 
+  async function handleMove(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= images.length) {
+      return;
+    }
+
+    const order = images.map((image) => image.id);
+    [order[index], order[target]] = [order[target], order[index]];
+
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/admin/products/${productId}/images`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ order }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setErrorMessage(body.message ?? "No pudimos reordenar las imágenes.");
+        return;
+      }
+
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Error inesperado.");
+    }
+  }
+
   async function handleDelete(image: ProductImage) {
     const confirmed = window.confirm(
       `¿Eliminar la imagen ${image.position + 1}? Esta acción no se puede deshacer.`,
@@ -115,18 +145,47 @@ export function ProductImages({ productId, images }: ProductImagesProps) {
     <tr className="border-b-0">
       <td className="py-2 pl-6" colSpan={6}>
         <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-4">
-            {images.map((image) => (
+          <div className="flex flex-wrap items-start gap-4">
+            {images.map((image, index) => (
               <div key={image.id} className="flex flex-col items-center gap-1">
-                {/* Admin-uploaded local files (design.md D8), not a
-                    configured remote image domain — mirrors
-                    ProductCard.tsx's same rule. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={image.url}
-                  alt={image.altText ?? ""}
-                  className="h-16 w-16 border border-ink/10 object-cover"
-                />
+                <div className="relative">
+                  {/* Admin-uploaded local files (design.md D8), not a
+                      configured remote image domain — mirrors
+                      ProductCard.tsx's same rule. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={image.url}
+                    alt={image.altText ?? ""}
+                    className="h-16 w-16 border border-ink/10 object-cover"
+                  />
+                  {index === 0 && images.length > 1 ? (
+                    <span className="absolute left-0 top-0 bg-ink px-1 font-sans text-[10px] uppercase tracking-widest text-paper">
+                      Portada
+                    </span>
+                  ) : null}
+                </div>
+                {images.length > 1 ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleMove(index, -1)}
+                      disabled={index === 0}
+                      aria-label={`Mover la imagen ${index + 1} hacia adelante`}
+                      className="border border-ink/20 px-1 font-sans text-body-sm text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleMove(index, 1)}
+                      disabled={index === images.length - 1}
+                      aria-label={`Mover la imagen ${index + 1} hacia atrás`}
+                      className="border border-ink/20 px-1 font-sans text-body-sm text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleDelete(image)}
@@ -148,6 +207,11 @@ export function ProductImages({ productId, images }: ProductImagesProps) {
               />
             </label>
           </div>
+          {images.length > 1 ? (
+            <span className="font-sans text-body-sm text-outline">
+              La primera imagen es la portada. Usá ↑ / ↓ para reordenar.
+            </span>
+          ) : null}
           {atCap ? (
             <span className="font-sans text-body-sm text-outline">Máximo 5 imágenes.</span>
           ) : null}

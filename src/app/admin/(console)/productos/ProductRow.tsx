@@ -159,12 +159,11 @@ export function ProductRow({
 
   const inputClassName = "border border-ink/20 px-3 py-2";
 
-  // Edit mode swaps ONLY this top <tr> for the product-fields form — the
-  // expanded variant/image rows below (gated on `expanded`, independent of
-  // `mode`) must keep rendering regardless, or clicking "Editar" while
-  // expanded makes them vanish with no indication why (the actual bug
-  // report this fixes: variants/images "can't be edited" because they
-  // silently disappeared the moment product-field editing started).
+  // Edit mode swaps ONLY this top <tr> for the product-fields form. The
+  // variant sub-rows below (gated on `expanded`) keep rendering while
+  // editing so they never vanish just because "Editar" was clicked. The
+  // image manager renders whenever the row is expanded OR being edited (see
+  // `showImages` below) — editing a product includes editing its images.
   const headerRow =
     isEditing ? (
       <tr className="border-b border-ink/10">
@@ -296,6 +295,12 @@ export function ProductRow({
       </tr>
     );
 
+  // Images are part of "editing a product": the image manager shows whenever
+  // the row is expanded OR its edit form is open, so the owner reaches it
+  // straight from "Editar" without the separate expand step. Variants keep
+  // the expand-only disclosure — editing a variant is its own action.
+  const showImages = expanded || isEditing;
+
   return (
     <>
       {headerRow}
@@ -305,7 +310,7 @@ export function ProductRow({
           ))
         : null}
       {expanded ? <AddVariantForm productId={product.id} /> : null}
-      {expanded ? <ProductImages productId={product.id} images={product.images} /> : null}
+      {showImages ? <ProductImages productId={product.id} images={product.images} /> : null}
     </>
   );
 }

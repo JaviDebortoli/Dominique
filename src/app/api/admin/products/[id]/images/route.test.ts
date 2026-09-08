@@ -14,7 +14,7 @@ vi.mock("@/lib/auth", () => makeAuthMockModule());
 
 const { auth } = await import("@/lib/auth");
 const mockedAuth = asMockedAuth(auth);
-const { POST } = await import("./route");
+const { POST, PATCH } = await import("./route");
 
 function postRequest(body: unknown): Request {
   return new Request("http://localhost/api/admin/products/x/images", {
@@ -29,6 +29,14 @@ function invalidJsonPostRequest(): Request {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{not json",
+  });
+}
+
+function patchRequest(body: unknown): Request {
+  return new Request("http://localhost/api/admin/products/x/images", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
 
@@ -177,5 +185,111 @@ describe("POST /api/admin/products/[id]/images (integration, real Postgres)", ()
 
     const countAfter = await prisma.productImage.count({ where: { productId: product.id } });
     expect(countAfter).toBe(5);
+  });
+});
+
+describe("PATCH /api/admin/products/[id]/images — reorder (integration, real Postgres)", () => {
+  const createdProductIds: string[] = [];
+  const createdCategoryIds: string[] = [];
+
+  afterAll(async () => {
+    await prisma.product.deleteMany({ where: { id: { in: createdProductIds } } });
+    await prisma.category.deleteMany({ where: { id: { in: createdCategoryIds } } });
+  });
+
+  async function makeProductWith3Images() {
+    const suffix = randomUUID();
+    const category = await prisma.category.create({
+      data: { name: `Reorder ${suffix}`, slug: `reorder-${suffix}` },
+    });
+    createdCategoryIds.push(category.id);
+    const product = await createProduct(prisma, {
+      name: `Reorder ${suffix}`,
+      slug: `reorder-${suffix}`,
+      price: 20000,
+      categoryId: category.id,
+      variants: [{ size: "U", color: "Negro", sku: `REORD-${suffix}`, onHand: 0 }],
+      images: [
+        { url: `/uploads/r0-${suffix}.jpg`, position: 0 },
+        { url: `/uploads/r1-${suffix}.jpg`, position: 1 },
+        { url: `/uploads/r2-${suffix}.jpg`, position: 2 },
+      ],
+    });
+    createdProductIds.push(product.id);
+    return product;
+  }
+
+  it("returns 200 with the reordered images and persists the new positions", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const product = await makeProductWith3Images();
+    const [a, b, c] = product.images;
+
+    const response = await PATCH(patchRequest({ order: [c.id, a.id, b.id] }), ctx(product.id));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.images.map((image: { id: string }) => image.id)).toEqual([c.id, a.id, b.id]);
+    expect(body.images.map((image: { position: number }) => image.position)).toEqual([0, 1, 2]);
+
+    const reread = await prisma.productImage.findMany({
+      where: { productId: product.id },
+      orderBy: { position: "asc" },
+    });
+    expect(reread.map((image) => image.id)).toEqual([c.id, a.id, b.id]);
+  });
+
+  it("returns 400 invalid_request when order is missing or not an array of non-empty strings", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const r1 = await PATCH(patchRequest({ order: "not-an-array" }), ctx("x"));
+    expect(r1.status).toBe(400);
+
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const r2 = await PATCH(patchRequest({ order: ["ok", ""] }), ctx("x"));
+    expect(r2.status).toBe(400);
+
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const r3 = await PATCH(patchRequest("{not json"), ctx("x"));
+    expect(r3.status).toBe(400);
+  });
+
+  it("returns 401 with no session and mutates nothing", async () => {
+    const product = await makeProductWith3Images();
+    const [a, b, c] = product.images;
+    mockedAuth.mockResolvedValueOnce(null);
+
+    const response = await PATCH(patchRequest({ order: [c.id, b.id, a.id] }), ctx(product.id));
+
+    expect(response.status).toBe(401);
+    const reread = await prisma.productImage.findMany({
+      where: { productId: product.id },
+      orderBy: { position: "asc" },
+    });
+    expect(reread.map((image) => image.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  it("returns 404 product_not_found for an unknown product id", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const response = await PATCH(
+      patchRequest({ order: [`img-${randomUUID()}`] }),
+      ctx(`does-not-exist-${randomUUID()}`),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe("product_not_found");
+  });
+
+  it("returns 409 image_order_mismatch when the id set does not match the product's images", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const product = await makeProductWith3Images();
+    const [a, b] = product.images;
+
+    const response = await PATCH(patchRequest({ order: [a.id, b.id] }), ctx(product.id));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe("image_order_mismatch");
+    const untouched = await prisma.productImage.findMany({
+      where: { productId: product.id },
+      orderBy: { position: "asc" },
+    });
+    expect(untouched.map((image) => image.position)).toEqual([0, 1, 2]);
   });
 });

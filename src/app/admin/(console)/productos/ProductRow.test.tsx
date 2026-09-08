@@ -248,7 +248,7 @@ describe("ProductRow", () => {
     expect(screen.queryByRole("button", { name: "Agregar" })).not.toBeInTheDocument();
   });
 
-  it("mounts ProductImages only when the Variantes cell has been toggled expanded (design.md G9), leaving the shipped edit/delete flow unaffected", async () => {
+  it("mounts ProductImages when the Variantes cell is toggled expanded, and hides it again on collapse", async () => {
     const user = userEvent.setup();
     renderRow({
       images: [
@@ -265,11 +265,29 @@ describe("ProductRow", () => {
     await user.click(screen.getByRole("button", { name: "2" }));
 
     expect(screen.queryByLabelText(/Subir imagen/i)).not.toBeInTheDocument();
+  });
 
-    // The shipped edit/delete flow for the product row itself is unaffected
-    // by the ProductImages mount.
+  it("mounts ProductImages when the row is being edited, even if it was never expanded", async () => {
+    const user = userEvent.setup();
+    renderRow({
+      images: [
+        { id: "img-1", productId: "prod-1", url: "/uploads/img-1.jpg", altText: null, position: 0, createdAt: new Date() },
+      ],
+    });
+
+    expect(screen.queryByLabelText(/Subir imagen/i)).not.toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "Editar" }));
+
+    // The product-field form AND the image manager are both available.
     expect(screen.getByLabelText(/nombre/i)).toHaveValue("Vestido Lino");
+    expect(screen.getByLabelText(/Subir imagen/i)).toBeInTheDocument();
+    // Variants still need the separate expand — this change is images-only.
+    expect(screen.queryByText("VL-BEI-M")).not.toBeInTheDocument();
+
+    // Closing the edit form hides the image manager again (never expanded).
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByLabelText(/Subir imagen/i)).not.toBeInTheDocument();
   });
 
   it("keeps the expanded VariantRow/AddVariantForm/ProductImages rows visible while editing the product's core fields (they must not disappear just because Editar was clicked)", async () => {

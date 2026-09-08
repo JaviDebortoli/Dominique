@@ -360,6 +360,67 @@ export async function deleteImage(prisma: PrismaClient, imageId: string): Promis
   }
 }
 
+/** The `order` payload does not name exactly the product's current image set
+ * (a missing id, an extra id, a duplicate, or a wrong count). */
+export class ImageOrderMismatchError extends Error {
+  constructor(public readonly productId: string) {
+    super(`The provided image order does not match product ${productId}'s images exactly.`);
+    this.name = "ImageOrderMismatchError";
+  }
+}
+
+/**
+ * Rewrites every ProductImage's `position` to its index in `orderedImageIds`
+ * (index 0 = the storefront's primary/cover image). The payload MUST name the
+ * product's current images exactly — no missing, extra, or duplicate ids —
+ * otherwise the whole reorder is rejected with `ImageOrderMismatchError` and
+ * nothing is written. The position updates run in one `$transaction` so a
+ * partial reorder can never be observed.
+ */
+export async function reorderProductImages(
+  prisma: PrismaClient,
+  productId: string,
+  orderedImageIds: string[],
+): Promise<ProductImage[]> {
+  const existing = await prisma.productImage.findMany({
+    where: { productId },
+    select: { id: true },
+  });
+
+  if (existing.length === 0) {
+    // Zero rows is ambiguous: unknown product, or a real product with no
+    // images yet. Only the first is an error.
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true },
+    });
+    if (!product) {
+      throw new ProductNotFoundError(productId);
+    }
+  }
+
+  const existingIds = new Set(existing.map((image) => image.id));
+  const providedIds = new Set(orderedImageIds);
+  const exactMatch =
+    orderedImageIds.length === existing.length &&
+    providedIds.size === orderedImageIds.length &&
+    [...providedIds].every((id) => existingIds.has(id));
+  if (!exactMatch) {
+    throw new ImageOrderMismatchError(productId);
+  }
+
+  await prisma.$transaction(
+    orderedImageIds.map((id, index) =>
+      prisma.productImage.update({ where: { id }, data: { position: index } }),
+    ),
+  );
+
+  return prisma.productImage.findMany({
+    where: { productId },
+    orderBy: { position: "asc" },
+  });
+}
+
 /**
  * A product with zero images is still valid to save (spec: "SHALL still
  * allow the save") but SHOULD be flagged incomplete for storefront display.

@@ -199,4 +199,72 @@ describe("ProductImages", () => {
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
   });
+
+  it("shows ↑/↓ per image with the ends disabled, marks the first as Portada, and hides the controls for a single image", () => {
+    const { rerender } = renderGallery([
+      makeImage({ id: "a", position: 0 }),
+      makeImage({ id: "b", position: 1 }),
+      makeImage({ id: "c", position: 2 }),
+    ]);
+
+    expect(screen.getByText("Portada")).toBeInTheDocument();
+    const up = screen.getAllByRole("button", { name: /hacia adelante/ });
+    const down = screen.getAllByRole("button", { name: /hacia atrás/ });
+    expect(up[0]).toBeDisabled();
+    expect(up[1]).toBeEnabled();
+    expect(down[2]).toBeDisabled();
+    expect(down[1]).toBeEnabled();
+
+    rerender(
+      <table>
+        <tbody>
+          <ProductImages productId="prod-1" images={[makeImage({ id: "a", position: 0 })]} />
+        </tbody>
+      </table>,
+    );
+    expect(screen.queryByRole("button", { name: /hacia adelante/ })).not.toBeInTheDocument();
+  });
+
+  it("PATCHes the swapped order and refreshes when an image is moved", async () => {
+    const user = userEvent.setup();
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ images: [] }),
+    });
+    renderGallery([
+      makeImage({ id: "a", position: 0 }),
+      makeImage({ id: "b", position: 1 }),
+      makeImage({ id: "c", position: 2 }),
+    ]);
+
+    // move image 1 ("a") down -> [b, a, c]
+    await user.click(screen.getAllByRole("button", { name: /hacia atrás/ })[0]);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/admin/products/prod-1/images",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ order: ["b", "a", "c"] }),
+      }),
+    );
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+  });
+
+  it("surfaces the server message and does not refresh when a reorder is rejected", async () => {
+    const user = userEvent.setup();
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ message: "El orden enviado no coincide con las imágenes del producto." }),
+    });
+    renderGallery([makeImage({ id: "a", position: 0 }), makeImage({ id: "b", position: 1 })]);
+
+    await user.click(screen.getAllByRole("button", { name: /hacia atrás/ })[0]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "El orden enviado no coincide con las imágenes del producto.",
+    );
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
 });

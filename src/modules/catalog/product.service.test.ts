@@ -11,6 +11,7 @@ import {
   DuplicateSkuError,
   DuplicateVariantError,
   getProductBySlug,
+  ImageOrderMismatchError,
   isProductIncomplete,
   LastVariantError,
   listAllProductsForAdmin,
@@ -20,6 +21,7 @@ import {
   ProductHasStockError,
   ProductImageNotFoundError,
   ProductNotFoundError,
+  reorderProductImages,
   TooManyImagesError,
   updateProduct,
   updateVariant,
@@ -921,6 +923,69 @@ describe("product.service (integration, real Postgres)", () => {
       await expect(deleteImage(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
         ProductImageNotFoundError,
       );
+    });
+  });
+
+  describe("reorderProductImages — persists a new display order", () => {
+    async function makeProductWith3Images() {
+      const category = await makeCategory("reorder");
+      const suffix = randomUUID();
+      const product = await createProduct(prisma, {
+        name: "Producto Reorder",
+        slug: `producto-reorder-${suffix}`,
+        price: 30000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `REORD-${suffix}`, onHand: 0 }],
+        images: [
+          { url: `/uploads/r-0-${suffix}.jpg`, position: 0 },
+          { url: `/uploads/r-1-${suffix}.jpg`, position: 1 },
+          { url: `/uploads/r-2-${suffix}.jpg`, position: 2 },
+        ],
+      });
+      createdProductIds.push(product.id);
+      return product;
+    }
+
+    it("rewrites every image's position to its index in the given order", async () => {
+      const product = await makeProductWith3Images();
+      const [a, b, c] = product.images;
+
+      const result = await reorderProductImages(prisma, product.id, [c.id, a.id, b.id]);
+
+      expect(result.map((image) => image.id)).toEqual([c.id, a.id, b.id]);
+      expect(result.map((image) => image.position)).toEqual([0, 1, 2]);
+
+      const reread = await prisma.productImage.findMany({
+        where: { productId: product.id },
+        orderBy: { position: "asc" },
+      });
+      expect(reread.map((image) => image.id)).toEqual([c.id, a.id, b.id]);
+    });
+
+    it("throws ImageOrderMismatchError and writes nothing when the id set does not match", async () => {
+      const product = await makeProductWith3Images();
+      const [a, b] = product.images;
+
+      // missing one id
+      await expect(reorderProductImages(prisma, product.id, [a.id, b.id])).rejects.toThrow(
+        ImageOrderMismatchError,
+      );
+      // a duplicate
+      await expect(
+        reorderProductImages(prisma, product.id, [a.id, a.id, b.id]),
+      ).rejects.toThrow(ImageOrderMismatchError);
+
+      const untouched = await prisma.productImage.findMany({
+        where: { productId: product.id },
+        orderBy: { position: "asc" },
+      });
+      expect(untouched.map((image) => image.position)).toEqual([0, 1, 2]);
+    });
+
+    it("throws ProductNotFoundError for an unknown product id", async () => {
+      await expect(
+        reorderProductImages(prisma, `nope-${randomUUID()}`, [`img-${randomUUID()}`]),
+      ).rejects.toThrow(ProductNotFoundError);
     });
   });
 });

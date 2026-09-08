@@ -11,7 +11,13 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { addImage, ProductNotFoundError, TooManyImagesError } from "@/modules/catalog/product.service";
+import {
+  addImage,
+  ImageOrderMismatchError,
+  ProductNotFoundError,
+  reorderProductImages,
+  TooManyImagesError,
+} from "@/modules/catalog/product.service";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -92,6 +98,69 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           error: "too_many_images",
           message: "Máximo 5 imágenes por producto. Eliminá una antes de subir otra.",
           currentCount: error.currentCount,
+        },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Reorders a product's images. Body: `{ order: string[] }` — every image id
+ * of the product, in the new display order (index 0 is the storefront cover
+ * image). Backs specs/admin-console/spec.md "Owner reorders a product's
+ * images".
+ */
+export async function PATCH(request: Request, context: RouteContext): Promise<Response> {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const order =
+    typeof rawBody === "object" && rawBody !== null
+      ? (rawBody as { order?: unknown }).order
+      : undefined;
+  if (
+    !Array.isArray(order) ||
+    order.length === 0 ||
+    !order.every((id) => typeof id === "string" && id.trim().length > 0)
+  ) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const { id: productId } = await context.params;
+
+  try {
+    const images = await reorderProductImages(prisma, productId, order as string[]);
+    return NextResponse.json(
+      {
+        images: images.map((image) => ({
+          id: image.id,
+          url: image.url,
+          altText: image.altText,
+          position: image.position,
+        })),
+      },
+      { status: 200 },
+    );
+  } catch (error) {
+    if (error instanceof ProductNotFoundError) {
+      return NextResponse.json({ error: "product_not_found" }, { status: 404 });
+    }
+    if (error instanceof ImageOrderMismatchError) {
+      return NextResponse.json(
+        {
+          error: "image_order_mismatch",
+          message: "El orden enviado no coincide con las imágenes del producto. Recargá y probá de nuevo.",
         },
         { status: 409 },
       );
