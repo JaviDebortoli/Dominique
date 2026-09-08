@@ -35,18 +35,18 @@ export default async function CajaPage({ searchParams }: CajaPageProps) {
     <section className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-serif text-headline-md text-ink">Caja</h1>
-        <div className="flex items-center gap-4">
-          <form className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <form className="flex min-w-0 gap-2">
             <input
               type="search"
               name="q"
               defaultValue={q ?? ""}
               placeholder="Buscar por SKU o producto"
-              className="border border-ink/20 px-3 py-2 font-sans text-body-md"
+              className="min-w-0 flex-1 border border-ink/20 px-3 py-2 font-sans text-body-md sm:w-64 sm:flex-none"
             />
             <button
               type="submit"
-              className="border border-ink/20 px-4 py-2 font-sans text-label-caps uppercase tracking-widest text-ink hover:bg-surface"
+              className="shrink-0 border border-ink/20 px-4 py-2 font-sans text-label-caps uppercase tracking-widest text-ink hover:bg-surface"
             >
               Buscar
             </button>
@@ -55,37 +55,43 @@ export default async function CajaPage({ searchParams }: CajaPageProps) {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto border border-ink/15">
         <table className="w-full border-collapse font-sans text-body-md text-ink">
           <thead>
-            <tr className="border-b border-ink/20 text-left">
-              <th className="py-2">Producto</th>
-              <th className="py-2">Talle/Color</th>
-              <th className="py-2">SKU</th>
-              <th className="py-2 text-right">Disponible</th>
-              <th className="py-2 text-right">Reservado</th>
-              <th className="py-2 text-right">En depósito</th>
-              <th className="py-2">Reservas</th>
-              <th className="py-2" />
+            <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
+              <th className="px-4 py-3 font-semibold">Producto</th>
+              <th className="px-4 py-3 font-semibold">Talle / Color</th>
+              <th className="px-4 py-3 font-semibold">SKU</th>
+              <th className="px-4 py-3 text-center font-semibold">Disponible</th>
+              <th className="px-4 py-3 text-center font-semibold">Reservado</th>
+              <th className="px-4 py-3 text-center font-semibold">En depósito</th>
+              <th className="px-4 py-3 font-semibold">Reservas</th>
+              <th className="px-4 py-3 text-right font-semibold">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.variantId} className="border-b border-ink/10 align-top">
-                <td className="py-2">{row.productName}</td>
-                <td className="py-2">
+              <tr
+                key={row.variantId}
+                className="divide-x divide-ink/10 border-b border-ink/10 align-middle last:border-b-0 hover:bg-surface"
+              >
+                <td className="px-4 py-3 font-medium">{row.productName}</td>
+                <td className="px-4 py-3 text-on-surface-variant">
                   {row.size} / {row.color}
                 </td>
-                <td className="py-2">{row.sku}</td>
-                <td className="py-2 text-right font-semibold">{row.disponible}</td>
-                <td className="py-2 text-right">{row.reservado}</td>
-                <td className="py-2 text-right">{row.enDeposito}</td>
-                <td className="py-2">
+                <td className="px-4 py-3 tabular-nums text-on-surface-variant">{row.sku}</td>
+                <td className="px-4 py-3 text-center text-body-lg font-semibold tabular-nums">
+                  {row.disponible}
+                </td>
+                <td className="px-4 py-3 text-center tabular-nums">{row.reservado}</td>
+                <td className="px-4 py-3 text-center tabular-nums">{row.enDeposito}</td>
+                <td className="px-4 py-3">
                   {row.reservations.length > 0 ? (
                     <ul className="flex flex-col gap-1">
                       {row.reservations.map((reservation) => (
                         <li key={reservation.orderId} className="text-label-caps text-outline">
-                          {reservation.buyerName} · {reservation.qty}u · vence {formatExpiry(reservation.expiresAt)}
+                          {reservation.buyerName} · {reservation.qty}u · vence{" "}
+                          {formatExpiry(reservation.expiresAt)}
                         </li>
                       ))}
                     </ul>
@@ -93,14 +99,16 @@ export default async function CajaPage({ searchParams }: CajaPageProps) {
                     <span className="text-outline">—</span>
                   )}
                 </td>
-                <td className="py-2">
-                  <CajaRowActions variantId={row.variantId} disponible={row.disponible} />
+                <td className="px-4 py-3">
+                  <div className="flex justify-end">
+                    <CajaRowActions variantId={row.variantId} disponible={row.disponible} />
+                  </div>
                 </td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-outline">
+                <td colSpan={8} className="px-4 py-8 text-center text-outline">
                   Sin resultados.
                 </td>
               </tr>

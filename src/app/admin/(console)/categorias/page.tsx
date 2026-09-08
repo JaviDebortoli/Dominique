@@ -20,14 +20,14 @@ export default async function AdminCategoriasPage() {
       <div className="flex flex-col gap-4">
         <h1 className="font-serif text-headline-md text-ink">Categorías</h1>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto border border-ink/15">
           <table className="w-full border-collapse font-sans text-body-md text-ink">
             <thead>
-              <tr className="border-b border-ink/20 text-left">
-                <th className="py-2">Categoría</th>
-                <th className="py-2">Slug</th>
-                <th className="py-2 text-right">Productos</th>
-                <th className="py-2 text-right">Acciones</th>
+              <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
+                <th className="px-4 py-3 font-semibold">Categoría</th>
+                <th className="px-4 py-3 font-semibold">Slug</th>
+                <th className="px-4 py-3 text-center font-semibold">Productos</th>
+                <th className="px-4 py-3 text-right font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -36,7 +36,7 @@ export default async function AdminCategoriasPage() {
               ))}
               {categories.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-6 text-center text-outline">
+                  <td colSpan={4} className="px-4 py-8 text-center text-outline">
                     Todavía no hay categorías. Creá la primera acá abajo.
                   </td>
                 </tr>

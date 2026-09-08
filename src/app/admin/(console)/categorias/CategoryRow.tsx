@@ -107,8 +107,8 @@ export function CategoryRow({ category }: CategoryRowProps) {
   }
 
   return (
-    <tr className="border-b border-ink/10">
-      <td className="py-2">
+    <tr className="divide-x divide-ink/10 border-b border-ink/10 align-middle last:border-b-0 hover:bg-surface">
+      <td className="px-4 py-3 font-medium">
         {mode === "edit" ? (
           <input
             autoFocus
@@ -121,15 +121,15 @@ export function CategoryRow({ category }: CategoryRowProps) {
           category.name
         )}
       </td>
-      <td className="py-2">
+      <td className="px-4 py-3 text-on-surface-variant">
         {mode === "edit" ? (
           <span className="font-sans text-body-sm text-outline">/categoria/{category.slug}</span>
         ) : (
           category.slug
         )}
       </td>
-      <td className="py-2 text-right">{category.productCount}</td>
-      <td className="py-2 text-right">
+      <td className="px-4 py-3 text-center tabular-nums">{category.productCount}</td>
+      <td className="px-4 py-3">
         <div className="flex flex-col items-end gap-1">
           <div className="flex justify-end gap-4">
             {mode === "edit" ? (

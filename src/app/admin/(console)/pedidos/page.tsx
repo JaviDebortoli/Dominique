@@ -41,32 +41,37 @@ export default async function AdminOrdersPage() {
     <section className="flex flex-col gap-6">
       <h1 className="font-serif text-headline-md text-ink">Pedidos</h1>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto border border-ink/15">
         <table className="w-full border-collapse font-sans text-body-md text-ink">
           <thead>
-            <tr className="border-b border-ink/20 text-left">
-              <th className="py-2">Código</th>
-              <th className="py-2">Comprador</th>
-              <th className="py-2">Método</th>
-              <th className="py-2">Estado</th>
-              <th className="py-2 text-right">Ítems</th>
-              <th className="py-2" />
+            <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
+              <th className="px-4 py-3 font-semibold">Código</th>
+              <th className="px-4 py-3 font-semibold">Comprador</th>
+              <th className="px-4 py-3 font-semibold">Método</th>
+              <th className="px-4 py-3 font-semibold">Estado</th>
+              <th className="px-4 py-3 text-center font-semibold">Ítems</th>
+              <th className="px-4 py-3 text-right font-semibold">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {orders.map((order) => (
-              <tr key={order.id} className="border-b border-ink/10">
-                <td className="py-2">{order.publicCode}</td>
-                <td className="py-2">
+              <tr
+                key={order.id}
+                className="divide-x divide-ink/10 border-b border-ink/10 align-middle last:border-b-0 hover:bg-surface"
+              >
+                <td className="px-4 py-3 font-medium tabular-nums">{order.publicCode}</td>
+                <td className="px-4 py-3">
                   {order.buyerName}
                   <div className="text-label-caps text-outline">{order.email}</div>
                 </td>
-                <td className="py-2">{order.method === "MP" ? "MercadoPago" : "Retiro en local"}</td>
-                <td className="py-2">{STATUS_LABELS_ES_AR[order.status]}</td>
-                <td className="py-2 text-right">
+                <td className="px-4 py-3">
+                  {order.method === "MP" ? "MercadoPago" : "Retiro en local"}
+                </td>
+                <td className="px-4 py-3">{STATUS_LABELS_ES_AR[order.status]}</td>
+                <td className="px-4 py-3 text-center tabular-nums">
                   {order.items.reduce((sum, item) => sum + item.qty, 0)}
                 </td>
-                <td className="py-2">
+                <td className="px-4 py-3">
                   <div className="flex flex-col items-end gap-2">
                     {PICKUP_ELIGIBLE.includes(order.status) ? (
                       <OrderPickupButton orderId={order.id} />
@@ -80,7 +85,7 @@ export default async function AdminOrdersPage() {
             ))}
             {orders.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-outline">
+                <td colSpan={6} className="px-4 py-8 text-center text-outline">
                   Todavía no hay pedidos.
                 </td>
               </tr>
