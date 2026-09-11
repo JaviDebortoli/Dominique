@@ -55,19 +55,19 @@ export function CheckoutForm({ items }: CheckoutFormProps) {
         }),
       });
 
-      // tasks.md 5.1 — for method=MP the server responds with a real HTTP
-      // 303 to MercadoPago's init_point. fetch's default "follow" redirect
-      // mode silently follows it (no browser navigation happens on its
-      // own) and exposes the final URL via response.redirected/
-      // response.url — this is the signal to navigate the browser there
-      // ourselves, before ever trying to parse a JSON body (MercadoPago's
-      // hosted checkout page is HTML, not JSON).
-      if (response.redirected) {
-        window.location.assign(response.url);
+      const body = await response.json();
+
+      // tasks.md 5.1 — for method=MP the server responds 200 with
+      // { redirectUrl }, not a raw HTTP redirect: MercadoPago's init_point
+      // is a cross-origin page that sends no Access-Control-Allow-Origin
+      // header, so fetch() can't follow a redirect there — the browser
+      // blocks the response with a CORS network error before this code
+      // ever runs. The server hands back the URL as data instead, and we
+      // do a real top-level navigation to it ourselves.
+      if (response.ok && typeof body.redirectUrl === "string") {
+        window.location.assign(body.redirectUrl);
         return;
       }
-
-      const body = await response.json();
 
       if (!response.ok) {
         // tasks.md 3.2, design.md's CheckoutForm 409 mapping — the route

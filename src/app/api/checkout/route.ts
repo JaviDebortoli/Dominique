@@ -123,12 +123,18 @@ function validateRequestBody(body: CheckoutRequestBody): CheckoutValidationResul
 
 /**
  * tasks.md 5.1 — creates the MercadoPago preference for a just-created
- * PENDING_PAYMENT order and responds with a real HTTP 303 to `init_point`
- * (design.md's Sequence — Payment (MercadoPago) diagram: "create
- * preference ... 303 → init_point"). A single summarized line item is used
- * (title = order's public code) rather than itemizing every product name,
- * to avoid a second product/variant lookup in this thin adapter — the
- * itemized total is still exact, just not broken out line-by-line on
+ * PENDING_PAYMENT order and responds 200 with `{ redirectUrl: initPoint }`.
+ * NOT a raw HTTP redirect: `init_point` is MercadoPago's hosted checkout
+ * page, a cross-origin destination that sends no
+ * Access-Control-Allow-Origin header — the browser's fetch() (used by
+ * CheckoutForm.tsx) cannot read a redirect response landing there and
+ * fails the whole request with a CORS network error before the client
+ * ever sees a URL to navigate to. Handing the URL back as JSON lets the
+ * client do a real top-level `window.location.assign()` instead of
+ * relying on fetch's redirect-follow. A single summarized line item is
+ * used (title = order's public code) rather than itemizing every product
+ * name, to avoid a second product/variant lookup in this thin adapter —
+ * the itemized total is still exact, just not broken out line-by-line on
  * MercadoPago's hosted checkout page.
  *
  * If preference creation fails (e.g. missing/invalid MP_ACCESS_TOKEN — the
@@ -149,7 +155,7 @@ async function createMercadoPagoRedirect(order: PendingOrder): Promise<Response>
       payerEmail: order.email,
       baseUrl: process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000",
     });
-    return NextResponse.redirect(preference.initPoint, 303);
+    return NextResponse.json({ redirectUrl: preference.initPoint });
   } catch (error) {
     await compensateFailedPreference(order);
     console.error("MercadoPago preference creation failed; order compensated", error);

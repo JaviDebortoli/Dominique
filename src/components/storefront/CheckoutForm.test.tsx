@@ -89,19 +89,18 @@ describe("CheckoutForm", () => {
     expect(await screen.findByText(/DOM-ABC123/)).toBeInTheDocument();
   });
 
-  // tasks.md 5.1 — the server responds 303 to MercadoPago's init_point;
-  // fetch's default redirect mode ("follow") silently follows it and
-  // exposes the final URL via response.redirected/response.url instead of
-  // the browser ever navigating on its own. The client must detect that
-  // and navigate itself.
-  it("MercadoPago path: navigates the browser to response.url when fetch reports a followed redirect", async () => {
+  // The server responds 200 JSON with { redirectUrl } instead of a raw
+  // HTTP redirect: MercadoPago's init_point is a cross-origin page that
+  // does not send CORS headers, so fetch() cannot follow a redirect to it
+  // (the browser blocks the response — "Missing Access-Control-Allow-
+  // Origin"). Handing the URL back as data lets the client do a real
+  // top-level navigation instead of relying on fetch's redirect-follow.
+  it("MercadoPago path: navigates the browser to body.redirectUrl", async () => {
     const user = userEvent.setup();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
-      redirected: true,
-      url: "https://mercadopago.example.com/checkout/pref-123",
-      json: async () => ({}),
+      json: async () => ({ redirectUrl: "https://mercadopago.example.com/checkout/pref-123" }),
     });
     const assignSpy = vi.fn();
     Object.defineProperty(window, "location", {

@@ -16,8 +16,10 @@ import type { MercadoPagoClient } from "@/modules/payments/mercadopago";
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 const mockedCookies = vi.mocked(cookies);
 
-// task 5.1: preference created for a PENDING_PAYMENT order, 303 redirect to
-// init_point. The real MP SDK boundary is swapped for a fake via vi.mock —
+// task 5.1: preference created for a PENDING_PAYMENT order, 200 JSON with
+// redirectUrl to init_point (a raw 303 can't be followed by fetch() across
+// origins without CORS — see checkout/route.ts's createMercadoPagoRedirect
+// doc comment). The real MP SDK boundary is swapped for a fake via vi.mock —
 // no live credentials/network needed (see .env.example + apply-progress for
 // what the owner still needs to do to go live).
 let fakeCreatePreference: MercadoPagoClient["createPreference"] = async () => ({
@@ -317,10 +319,11 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
     });
   });
 
-  // tasks.md 5.1 — preference created for the PENDING_PAYMENT order, 303
-  // redirect to init_point.
+  // tasks.md 5.1 — preference created for the PENDING_PAYMENT order, 200
+  // JSON with redirectUrl to init_point (not a raw redirect — see
+  // route.ts's createMercadoPagoRedirect doc comment for why).
   describe("MercadoPago preference creation (task 5.1)", () => {
-    it("creates the order and responds 303 to the MercadoPago init_point when method=MP", async () => {
+    it("creates the order and responds 200 with redirectUrl to the MercadoPago init_point when method=MP", async () => {
       const variant = await makeVariant(3);
       fakeCreatePreference = async (input) => {
         expect(input.orderId).toBeTruthy();
@@ -339,12 +342,12 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
         }),
       );
 
-      expect(response.status).toBe(303);
+      expect(response.status).toBe(200);
       expect(createPreferenceCalls).toBe(callsBefore + 1);
-      const location = response.headers.get("location");
-      expect(location).toMatch(/^https:\/\/mp\.example\.com\/pay\//);
+      const body = await response.json();
+      expect(body.redirectUrl).toMatch(/^https:\/\/mp\.example\.com\/pay\//);
 
-      const orderId = location!.split("/").pop()!;
+      const orderId = body.redirectUrl.split("/").pop()!;
       createdOrderIds.push(orderId);
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
       expect(order.status).toBe("PENDING_PAYMENT");
@@ -501,7 +504,7 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
       expect(store.get("dominique_cart")).toBe("[]");
     });
 
-    it("clears the cart cookie on a successful MercadoPago order (303 redirect)", async () => {
+    it("clears the cart cookie on a successful MercadoPago order (200 redirectUrl)", async () => {
       const variant = await makeVariant(2);
       fakeCreatePreference = async (input) => ({
         preferenceId: `pref-${input.orderId}`,
@@ -521,9 +524,9 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
         }),
       );
 
-      expect(response.status).toBe(303);
-      const location = response.headers.get("location");
-      const orderId = location!.split("/").pop()!;
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      const orderId = body.redirectUrl.split("/").pop()!;
       createdOrderIds.push(orderId);
       expect(store.get("dominique_cart")).toBe("[]");
     });
