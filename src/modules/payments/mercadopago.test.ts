@@ -1,6 +1,23 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPreferenceRequest, verifyWebhookSignature } from "./mercadopago";
+
+// createMercadoPagoClient's createPreference() wraps the real `mercadopago`
+// SDK's Preference.create() — partially mocked here (keeping the real
+// WebhookSignatureValidator/InvalidWebhookSignatureError so the
+// verifyWebhookSignature suite above stays fully real) so we can control the
+// preference-create response shape without a live network call/credentials.
+const preferenceCreateMock = vi.fn();
+vi.mock("mercadopago", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("mercadopago")>();
+  return {
+    ...actual,
+    MercadoPagoConfig: vi.fn(),
+    Preference: vi.fn().mockImplementation(function MockPreference() {
+      return { create: preferenceCreateMock };
+    }),
+  };
+});
 
 // Unit tests only — no DB, no network, no live MercadoPago credentials
 // needed (see task instructions: "the actual MP SDK call is a thin,
@@ -141,5 +158,54 @@ describe("mercadopago — buildPreferenceRequest (task 5.1, pure preference mapp
     });
     expect(request.back_urls?.success).toBe("https://dominique.example.com/pedido/DOM-ZZZZ9999");
     expect(request.payer).toBeUndefined();
+  });
+});
+
+describe("mercadopago — createMercadoPagoClient().createPreference (sandbox vs live init_point)", () => {
+  const baseInput = {
+    orderId: "order-123",
+    publicCode: "DOM-ABCD1234",
+    items: [{ title: "Vestido Talle M", quantity: 1, unitPrice: 15000 }],
+    baseUrl: "https://dominique.example.com",
+  };
+
+  beforeEach(() => {
+    process.env.MP_ACCESS_TOKEN = "TEST-fake-token-for-unit-test";
+    preferenceCreateMock.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env.MP_ACCESS_TOKEN;
+  });
+
+  it("prefers sandbox_init_point over init_point when the response includes both — sandbox credentials must never redirect buyers to the live checkout", async () => {
+    preferenceCreateMock.mockResolvedValue({
+      id: "pref-1",
+      init_point: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
+      sandbox_init_point: "https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
+    });
+
+    const { createMercadoPagoClient } = await import("./mercadopago");
+    const client = createMercadoPagoClient();
+    const result = await client.createPreference(baseInput);
+
+    expect(result.initPoint).toBe(
+      "https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
+    );
+  });
+
+  it("falls back to init_point when sandbox_init_point is absent (live/production credentials)", async () => {
+    preferenceCreateMock.mockResolvedValue({
+      id: "pref-2",
+      init_point: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-2",
+    });
+
+    const { createMercadoPagoClient } = await import("./mercadopago");
+    const client = createMercadoPagoClient();
+    const result = await client.createPreference(baseInput);
+
+    expect(result.initPoint).toBe(
+      "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-2",
+    );
   });
 });

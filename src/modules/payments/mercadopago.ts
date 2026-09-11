@@ -183,7 +183,14 @@ export function createMercadoPagoClient(): MercadoPagoClient {
           "MercadoPago preference response is missing id/init_point — cannot redirect to checkout.",
         );
       }
-      return { preferenceId: response.id, initPoint: response.init_point };
+      // Prefer sandbox_init_point when the response carries one: MercadoPago
+      // only populates it for sandbox-capable (test) credentials, so a real
+      // production credential falls through to init_point unchanged. Using
+      // init_point unconditionally would send every buyer — even one paying
+      // with a documented sandbox test card — to the REAL, live checkout,
+      // which correctly rejects those test cards instead of completing a
+      // test purchase.
+      return { preferenceId: response.id, initPoint: response.sandbox_init_point ?? response.init_point };
     },
     async getPayment(paymentId) {
       const response = await paymentClient.get({ id: paymentId });
