@@ -114,7 +114,12 @@ export default async function AdminOrdersPage() {
                 <td className="px-4 py-3">
                   <div className="flex flex-col items-end gap-2">
                     {PICKUP_ELIGIBLE.includes(order.status) ? (
-                      <OrderPickupButton orderId={order.id} />
+                      <OrderPickupButton
+                        orderId={order.id}
+                        requiresPaymentMethod={
+                          order.method === "PICKUP_CASH" && !order.paymentMethod
+                        }
+                      />
                     ) : null}
                     {CANCEL_ELIGIBLE.includes(order.status) ? (
                       <OrderCancelButton orderId={order.id} publicCode={order.publicCode} />
