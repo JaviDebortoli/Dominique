@@ -488,7 +488,33 @@ export class InvalidOrderStatusTransitionError extends Error {
   }
 }
 
-export async function markPickedUp(prisma: PrismaClient, orderId: string): Promise<PendingOrder> {
+// control-de-caja tasks.md 4.1/4.2 — specs/order-lifecycle/spec.md "MODIFIED
+// Requirement: Staff-Driven Status Transitions" ("PICKUP_CASH pickup
+// requires a payment-method choice"). markPickedUp() is the money-commit
+// moment for that order method (design.md diagram (c)), so it — not the
+// route — enforces this.
+export class PaymentMethodRequiredError extends Error {
+  constructor(public readonly orderId: string) {
+    super(
+      `Order ${orderId} is a PICKUP_CASH pickup and requires an explicit payment method (CASH or TRANSFER) to be marked picked up.`,
+    );
+    this.name = "PaymentMethodRequiredError";
+  }
+}
+
+export interface MarkPickedUpOptions {
+  /** Required exactly when the order is PICKUP_CASH and has no
+   * paymentMethod recorded yet (design.md D3). Ignored for the MP/PAID
+   * branch, which never needs a payment-method prompt — payment already
+   * occurred at the webhook. */
+  paymentMethod?: "CASH" | "TRANSFER";
+}
+
+export async function markPickedUp(
+  prisma: PrismaClient,
+  orderId: string,
+  options?: MarkPickedUpOptions,
+): Promise<PendingOrder> {
   const existingOrder = await findOrderOrThrow(prisma, orderId);
 
   if (existingOrder.status === "PAID") {
@@ -500,6 +526,17 @@ export async function markPickedUp(prisma: PrismaClient, orderId: string): Promi
   }
 
   if (existingOrder.status === "RESERVED") {
+    // design.md D3: applies whenever method === PICKUP_CASH and no method is
+    // already set — covers both a fresh RESERVED order and (defensively) any
+    // future path that could reach here without one already recorded.
+    if (
+      existingOrder.method === "PICKUP_CASH" &&
+      !existingOrder.paymentMethod &&
+      !options?.paymentMethod
+    ) {
+      throw new PaymentMethodRequiredError(orderId);
+    }
+
     return prisma.$transaction(
       async (tx) => {
         for (const item of existingOrder.items) {
@@ -507,7 +544,13 @@ export async function markPickedUp(prisma: PrismaClient, orderId: string): Promi
         }
         return tx.order.update({
           where: { id: orderId },
-          data: { status: "PICKED_UP", expiresAt: null },
+          data: {
+            status: "PICKED_UP",
+            expiresAt: null,
+            ...(existingOrder.method === "PICKUP_CASH" && options?.paymentMethod
+              ? { paymentMethod: options.paymentMethod }
+              : {}),
+          },
           include: { items: true },
         });
       },

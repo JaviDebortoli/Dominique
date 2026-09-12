@@ -16,8 +16,13 @@ const { auth } = await import("@/lib/auth");
 const mockedAuth = asMockedAuth(auth);
 const { POST } = await import("./route");
 
-function request(): Request {
-  return new Request("http://localhost/api/admin/orders/x/pickup", { method: "POST" });
+function request(body?: unknown): Request {
+  return new Request("http://localhost/api/admin/orders/x/pickup", {
+    method: "POST",
+    ...(body !== undefined
+      ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+      : {}),
+  });
 }
 
 function ctx(orderId: string) {
@@ -131,5 +136,61 @@ describe("POST /api/admin/orders/[orderId]/pickup (integration, real Postgres)",
     const response = await POST(request(), ctx("does-not-exist"));
 
     expect(response.status).toBe(404);
+  });
+
+  // control-de-caja tasks.md 4.3 — specs/order-lifecycle/spec.md "PICKUP_CASH
+  // pickup requires a payment-method choice" / "Selected payment method
+  // persists for reporting".
+  describe("PICKUP_CASH payment-method capture (control-de-caja)", () => {
+    async function makeReservedPickupOrder() {
+      const suffix = randomUUID();
+      const category = await prisma.category.create({
+        data: { name: `Pickup Cash Route ${suffix}`, slug: `pickup-cash-route-${suffix}` },
+      });
+      createdCategoryIds.push(category.id);
+      const product = await createProduct(prisma, {
+        name: `Producto Pickup Cash ${suffix}`,
+        slug: `producto-pickup-cash-${suffix}`,
+        price: 14000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Unico", sku: `PICKCASH-${suffix}`, onHand: 3 }],
+      });
+      createdProductIds.push(product.id);
+
+      const order = await createPendingOrder(prisma, {
+        buyerName: "Comprador Pickup Cash",
+        phone: "3815550007",
+        email: `pickup-cash-${suffix}@example.com`,
+        method: "PICKUP_CASH",
+        items: [{ variantId: product.variants[0]!.id, qty: 1 }],
+      });
+      createdOrderIds.push(order.id);
+      return order;
+    }
+
+    it("returns 400 payment_method_required when no paymentMethod is given", async () => {
+      mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+      const order = await makeReservedPickupOrder();
+
+      const response = await POST(request(), ctx(order.id));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toBe("payment_method_required");
+      const unchanged = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(unchanged.status).toBe("RESERVED");
+    });
+
+    it("persists the chosen payment method and marks the order PICKED_UP", async () => {
+      mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+      const order = await makeReservedPickupOrder();
+
+      const response = await POST(request({ paymentMethod: "CASH" }), ctx(order.id));
+
+      expect(response.status).toBe(200);
+      const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(updated.status).toBe("PICKED_UP");
+      expect(updated.paymentMethod).toBe("CASH");
+    });
   });
 });

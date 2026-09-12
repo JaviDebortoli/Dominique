@@ -16,6 +16,7 @@ import {
   InvalidOrderStatusTransitionError,
   markPickedUp,
   OrderNotFoundError,
+  PaymentMethodRequiredError,
   StockUnavailableError,
   TooManyOpenReservationsError,
 } from "./order.service";
@@ -728,7 +729,11 @@ describe("order.service — createPendingOrder (integration, real Postgres)", ()
       });
       createdOrderIds.push(order.id);
 
-      const result = await markPickedUp(prisma, order.id);
+      // control-de-caja: PICKUP_CASH pickup now requires an explicit
+      // payment-method choice at this exact transition (design.md D3) — see
+      // the dedicated "PICKUP_CASH payment-method capture" describe block
+      // below for the required-when-missing/persistence scenarios.
+      const result = await markPickedUp(prisma, order.id, { paymentMethod: "CASH" });
 
       expect(result.status).toBe("PICKED_UP");
       const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
@@ -766,6 +771,72 @@ describe("order.service — createPendingOrder (integration, real Postgres)", ()
       await expect(markPickedUp(prisma, `nope-${randomUUID()}`)).rejects.toThrow(
         OrderNotFoundError,
       );
+    });
+
+    // control-de-caja tasks.md 4.1 — specs/order-lifecycle/spec.md "MODIFIED
+    // Requirement: Staff-Driven Status Transitions" / "PICKUP_CASH pickup
+    // requires a payment-method choice". markPickedUp() is the actual
+    // payment-commit moment for PICKUP_CASH orders (design.md diagram (c)).
+    describe("PICKUP_CASH payment-method capture (control-de-caja)", () => {
+      async function makeReservedPickupOrder(onHand: number, qty = 1) {
+        const { variant } = await makeProductWithVariant(onHand, 18000);
+        const order = await createPendingOrder(prisma, {
+          ...guestContact(),
+          method: "PICKUP_CASH",
+          items: [{ variantId: variant.id, qty }],
+        });
+        createdOrderIds.push(order.id);
+        return { variant, order };
+      }
+
+      it("throws PaymentMethodRequiredError for a PICKUP_CASH order with no method given", async () => {
+        const { order } = await makeReservedPickupOrder(3);
+
+        await expect(markPickedUp(prisma, order.id)).rejects.toThrow(
+          PaymentMethodRequiredError,
+        );
+
+        const unchanged = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+        expect(unchanged.status).toBe("RESERVED");
+        expect(unchanged.paymentMethod).toBeNull();
+      });
+
+      it("persists the chosen payment method and commits stock on success", async () => {
+        const { variant, order } = await makeReservedPickupOrder(4, 2);
+
+        const result = await markPickedUp(prisma, order.id, { paymentMethod: "TRANSFER" });
+
+        expect(result.status).toBe("PICKED_UP");
+        expect(result.paymentMethod).toBe("TRANSFER");
+        const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+        expect(updatedVariant.onHand).toBe(2);
+        expect(updatedVariant.held).toBe(0);
+      });
+
+      it("triangulation: persists CASH just as well as TRANSFER", async () => {
+        const { order } = await makeReservedPickupOrder(2, 1);
+
+        const result = await markPickedUp(prisma, order.id, { paymentMethod: "CASH" });
+
+        expect(result.paymentMethod).toBe("CASH");
+      });
+
+      it("MP/PAID branch is unchanged: no payment method required, options ignored", async () => {
+        const { variant, order } = await makePendingOrder(3, 1);
+        await confirmPaymentApproved(prisma, {
+          orderId: order.id,
+          mpPaymentId: `mp-pickup-cash-unaffected-${randomUUID()}`,
+          amount: 20000,
+          rawPayload: { status: "approved" },
+        });
+
+        const result = await markPickedUp(prisma, order.id);
+
+        expect(result.status).toBe("PICKED_UP");
+        expect(result.paymentMethod).toBeNull();
+        const updatedVariant = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+        expect(updatedVariant.onHand).toBe(2);
+      });
     });
   });
 
