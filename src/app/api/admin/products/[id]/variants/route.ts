@@ -1,8 +1,17 @@
 // Admin add-variant route — thin HTTP adapter over
 // src/modules/catalog/product.service.ts's UNMODIFIED addVariant() (design.md
-// G5/G6). addVariant() itself is already validated and unit-tested; every
-// caller-side concern (auth, request shape, unknown product, HTTP status)
-// is answered here, in the route, not in the module.
+// G6) plus, optionally, one audited stock adjustment via
+// stock.service.ts's adjust() — the SAME mechanism /admin/caja's manual
+// reconciliation uses. addVariant() itself always creates at onHand: 0
+// (its contract is unchanged); an explicit, valid, positive `onHand` in the
+// request body is applied as a separate adjust() call right after, so the
+// initial quantity still lands as a real StockMovement (reason
+// ADJUSTMENT), not an invisible starting value. This supersedes the
+// original G5 "no stock input here, ever" decision — `held` stays
+// permanently blocked below (it's a derived reservation count, never
+// something to hand-set), but `onHand` no longer is. Every caller-side
+// concern (auth, request shape, unknown product, HTTP status) is answered
+// here, in the route, not in the module.
 //
 // NOT covered by src/proxy.ts's matcher (deliberately — see that file's
 // module doc: /api/admin/* checks its own session). Mirrors
@@ -15,6 +24,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { addVariant, DuplicateVariantError } from "@/modules/catalog/product.service";
+import { adjust } from "@/modules/inventory/stock.service";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -43,9 +53,25 @@ function validateBody(body: RawBody): ValidatedVariant | null {
     return null;
   }
 
-  // G5 — structurally never construct an `onHand` property on the object
-  // passed to addVariant(); this object literal has no such key.
+  // addVariant() itself still only ever sees size/color/sku — never
+  // constructed with an `onHand` key. Any initial stock is applied
+  // separately below, after creation, via adjust().
   return { size, color, sku };
+}
+
+type OnHandValidation = { ok: true; onHand: number } | { ok: false };
+
+/** Omitted -> 0 (today's default, unchanged). Present -> must be a
+ * non-negative integer; anything else is a validation failure, same as a
+ * malformed size/color/sku. */
+function validateOnHand(value: unknown): OnHandValidation {
+  if (value === undefined) {
+    return { ok: true, onHand: 0 };
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return { ok: false };
+  }
+  return { ok: true, onHand: value };
 }
 
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
@@ -61,14 +87,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // G5 — reject any onHand/held key outright rather than silently coercing
-  // or dropping it; a new variant always starts at onHand: 0 via
-  // addVariant()'s own `onHand ?? 0` default.
-  if ("onHand" in rawBody || "held" in rawBody) {
+  // `held` is a derived reservation count (only ever written by
+  // hold()/release()/commitPaid()) — reject it outright rather than
+  // silently coercing or dropping it. `onHand` is validated below instead;
+  // it's no longer blocked.
+  if ("held" in rawBody) {
     return NextResponse.json(
       {
         error: "stock_not_editable",
-        message: "El stock no se edita acá. Cargalo desde /admin/caja.",
+        message: "El stock reservado no se edita acá.",
       },
       { status: 400 },
     );
@@ -76,6 +103,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   const validated = validateBody(rawBody);
   if (!validated) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const onHandResult = validateOnHand(rawBody.onHand);
+  if (!onHandResult.ok) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -98,6 +130,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       color: validated.color,
       sku: validated.sku,
     });
+
+    // Always created at 0 above; a positive onHand becomes one audited
+    // adjust() call right after, so it lands as a real StockMovement
+    // instead of an invisible starting value. onHand>=held (both 0 on a
+    // brand-new variant) and delta>0 here, so adjust()'s own invariant
+    // check can never fail for this call.
+    if (onHandResult.onHand > 0) {
+      await adjust(prisma, {
+        variantId: variant.id,
+        delta: onHandResult.onHand,
+        actorId: session.user.id,
+      });
+    }
+
     return NextResponse.json(
       { id: variant.id, sku: variant.sku, size: variant.size, color: variant.color },
       { status: 201 },

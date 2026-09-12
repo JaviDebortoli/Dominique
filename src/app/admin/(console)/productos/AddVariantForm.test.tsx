@@ -7,18 +7,24 @@ import { AddVariantForm } from "./AddVariantForm";
 // user-event, stubbed global.fetch, mocked next/navigation's useRouter.
 // Backs specs/admin-console/spec.md "Owner adds a variant to an existing
 // product" and "Adding a duplicate size+color variant is rejected".
-// design.md G5 (no stock input, structurally never sends onHand/held), G9
-// (own full-width <tr> row). tasks.md 2.1/2.2.
+// design.md G9 (own full-width <tr> row). tasks.md 2.1/2.2.
+//
+// SKU auto-derive mirrors NewProductForm.tsx's deriveSku()/skuTouched
+// pattern, adapted to this form's single (non-array) variant. An optional
+// "Stock inicial" input supersedes the original G5 "no stock input, ever"
+// decision — entering a value here is only included in the POST body when
+// greater than 0, so the "leave it empty" path stays byte-identical to
+// before (no onHand key sent at all).
 const refreshMock = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock, push: vi.fn() }),
 }));
 
-function renderForm() {
+function renderForm(productName = "Vestido Roma") {
   return render(
     <table>
       <tbody>
-        <AddVariantForm productId="prod-1" />
+        <AddVariantForm productId="prod-1" productName={productName} />
       </tbody>
     </table>,
   );
@@ -36,28 +42,50 @@ describe("AddVariantForm", () => {
     global.fetch = originalFetch;
   });
 
-  it("renders Talle/Color/SKU inputs and an Agregar button, with no stock input anywhere", () => {
+  it("renders Talle/Color/SKU/Stock inicial inputs and an Agregar button", () => {
     renderForm();
 
     expect(screen.getByLabelText(/talle/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/color/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/sku/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/stock inicial/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Agregar" })).toBeInTheDocument();
-    expect(screen.queryByLabelText(/stock/i)).not.toBeInTheDocument();
   });
 
-  it("Agregar POSTs exactly { size, color, sku } and never an onHand or held key", async () => {
+  it("auto-derives the SKU from the product name + talle + color as they're typed", async () => {
+    const user = userEvent.setup();
+    renderForm("Vestido Roma");
+
+    await user.type(screen.getByLabelText(/talle/i), "S");
+    await user.type(screen.getByLabelText(/color/i), "Negro");
+
+    expect(screen.getByLabelText(/sku/i)).toHaveValue("VEST-S-NEG");
+  });
+
+  it("stops auto-deriving the SKU once the owner types into it directly", async () => {
+    const user = userEvent.setup();
+    renderForm("Vestido Roma");
+
+    await user.type(screen.getByLabelText(/talle/i), "S");
+    await user.type(screen.getByLabelText(/color/i), "Negro");
+    await user.clear(screen.getByLabelText(/sku/i));
+    await user.type(screen.getByLabelText(/sku/i), "CUSTOM-SKU");
+    await user.type(screen.getByLabelText(/color/i), "Azul");
+
+    expect(screen.getByLabelText(/sku/i)).toHaveValue("CUSTOM-SKU");
+  });
+
+  it("Agregar POSTs { size, color, sku } and omits onHand entirely when Stock inicial is left empty", async () => {
     const user = userEvent.setup();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 201,
-      json: async () => ({ id: "var-new", sku: "VL-BEI-L", size: "L", color: "Beige" }),
+      json: async () => ({ id: "var-new", sku: "VEST-L-BEI", size: "L", color: "Beige" }),
     });
 
-    renderForm();
+    renderForm("Vestido Roma");
     await user.type(screen.getByLabelText(/talle/i), "L");
     await user.type(screen.getByLabelText(/color/i), "Beige");
-    await user.type(screen.getByLabelText(/sku/i), "VL-BEI-L");
     await user.click(screen.getByRole("button", { name: "Agregar" }));
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
@@ -68,8 +96,30 @@ describe("AddVariantForm", () => {
     );
     const [, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     const parsedBody = JSON.parse(requestInit.body as string);
-    expect(parsedBody).toEqual({ size: "L", color: "Beige", sku: "VL-BEI-L" });
+    expect(parsedBody).toEqual({ size: "L", color: "Beige", sku: "VEST-L-BEI" });
     expect(parsedBody).not.toHaveProperty("onHand");
+    expect(parsedBody).not.toHaveProperty("held");
+  });
+
+  it("Agregar includes onHand when Stock inicial is a positive number, and never a held key", async () => {
+    const user = userEvent.setup();
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: "var-new", sku: "VEST-L-BEI", size: "L", color: "Beige" }),
+    });
+
+    renderForm("Vestido Roma");
+    await user.type(screen.getByLabelText(/talle/i), "L");
+    await user.type(screen.getByLabelText(/color/i), "Beige");
+    await user.type(screen.getByLabelText(/stock inicial/i), "5");
+    await user.click(screen.getByRole("button", { name: "Agregar" }));
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+
+    const [, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parsedBody = JSON.parse(requestInit.body as string);
+    expect(parsedBody).toEqual({ size: "L", color: "Beige", sku: "VEST-L-BEI", onHand: 5 });
     expect(parsedBody).not.toHaveProperty("held");
   });
 
@@ -96,7 +146,7 @@ describe("AddVariantForm", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
-  it("a 200/201 response clears the three inputs and calls router.refresh()", async () => {
+  it("a 200/201 response clears all four inputs and calls router.refresh()", async () => {
     const user = userEvent.setup();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
@@ -108,6 +158,7 @@ describe("AddVariantForm", () => {
     await user.type(screen.getByLabelText(/talle/i), "L");
     await user.type(screen.getByLabelText(/color/i), "Beige");
     await user.type(screen.getByLabelText(/sku/i), "VL-BEI-L");
+    await user.type(screen.getByLabelText(/stock inicial/i), "5");
     await user.click(screen.getByRole("button", { name: "Agregar" }));
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
@@ -115,5 +166,6 @@ describe("AddVariantForm", () => {
     expect(screen.getByLabelText(/talle/i)).toHaveValue("");
     expect(screen.getByLabelText(/color/i)).toHaveValue("");
     expect(screen.getByLabelText(/sku/i)).toHaveValue("");
+    expect(screen.getByLabelText(/stock inicial/i)).toHaveValue(null);
   });
 });

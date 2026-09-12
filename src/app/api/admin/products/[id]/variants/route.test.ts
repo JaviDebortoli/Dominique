@@ -6,11 +6,14 @@ import { createProduct } from "@/modules/catalog/product.service";
 
 // HTTP-level tests for the admin add-variant route — thin wiring over
 // src/modules/catalog/product.service.ts's UNMODIFIED addVariant() (design.md
-// G5/G6). Mirrors api/admin/products/[id]/variants/[variantId]/route.test.ts's
-// conventions: mocked auth() + real Postgres, one seeded product (+ optional
-// existing variant) per test. Backs specs/admin-console/spec.md "Owner adds a
-// variant to an existing product" and "Adding a duplicate size+color variant
-// is rejected". tasks.md 1.1/1.2.
+// G6) plus an optional initial-stock step via stock.service.ts's adjust()
+// (the same audited mechanism /admin/caja uses), superseding the original
+// G5 "no stock input, ever" decision. Mirrors
+// api/admin/products/[id]/variants/[variantId]/route.test.ts's conventions:
+// mocked auth() + real Postgres, one seeded product (+ optional existing
+// variant) per test. Backs specs/admin-console/spec.md "Owner adds a variant
+// to an existing product" and "Adding a duplicate size+color variant is
+// rejected". tasks.md 1.1/1.2.
 vi.mock("@/lib/auth", () => makeAuthMockModule());
 
 const { auth } = await import("@/lib/auth");
@@ -42,6 +45,9 @@ describe("POST /api/admin/products/[id]/variants (integration, real Postgres)", 
   const createdCategoryIds: string[] = [];
 
   afterAll(async () => {
+    await prisma.stockMovement.deleteMany({
+      where: { variant: { productId: { in: createdProductIds } } },
+    });
     await prisma.product.deleteMany({ where: { id: { in: createdProductIds } } });
     await prisma.category.deleteMany({ where: { id: { in: createdCategoryIds } } });
   });
@@ -77,7 +83,7 @@ describe("POST /api/admin/products/[id]/variants (integration, real Postgres)", 
     return product;
   }
 
-  it("returns 201 { id, sku, size, color } and persists onHand: 0", async () => {
+  it("returns 201 { id, sku, size, color } and persists onHand: 0 when onHand is omitted, with no StockMovement", async () => {
     mockedAuth.mockResolvedValueOnce(fakeAdminSession());
     const category = await makeCategory("Add Variant Happy");
     const product = await makeProductWithVariants("Add Variant Happy", category.id, [
@@ -96,6 +102,74 @@ describe("POST /api/admin/products/[id]/variants (integration, real Postgres)", 
 
     const created = await prisma.variant.findUniqueOrThrow({ where: { id: body.id } });
     expect(created.onHand).toBe(0);
+    const movements = await prisma.stockMovement.count({ where: { variantId: body.id } });
+    expect(movements).toBe(0);
+  });
+
+  it("returns 201 and persists onHand: N plus one audited ADJUSTMENT StockMovement when onHand is a positive integer", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const category = await makeCategory("Add Variant With Stock");
+    const product = await makeProductWithVariants("Add Variant With Stock", category.id, [
+      { size: "M", color: "Beige" },
+    ]);
+    const sku = `NEW-VARIANT-${randomUUID()}`;
+
+    const response = await POST(
+      postRequest({ size: "L", color: "Beige", sku, onHand: 7 }),
+      ctx(product.id),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toEqual({ id: expect.any(String), sku, size: "L", color: "Beige" });
+
+    const created = await prisma.variant.findUniqueOrThrow({ where: { id: body.id } });
+    expect(created.onHand).toBe(7);
+    const movement = await prisma.stockMovement.findFirstOrThrow({ where: { variantId: body.id } });
+    expect(movement.delta).toBe(7);
+    expect(movement.reason).toBe("ADJUSTMENT");
+  });
+
+  it("returns 400 invalid_request and creates no variant when onHand is negative", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const category = await makeCategory("Negative OnHand Add Variant");
+    const product = await makeProductWithVariants("Negative OnHand Add Variant", category.id, [
+      { size: "M", color: "Beige" },
+    ]);
+    const countBefore = await prisma.variant.count({ where: { productId: product.id } });
+
+    const response = await POST(
+      postRequest({ size: "L", color: "Beige", sku: `SKU-${randomUUID()}`, onHand: -1 }),
+      ctx(product.id),
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_request");
+
+    const countAfter = await prisma.variant.count({ where: { productId: product.id } });
+    expect(countAfter).toBe(countBefore);
+  });
+
+  it("returns 400 invalid_request and creates no variant when onHand is not an integer", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const category = await makeCategory("Non Integer OnHand Add Variant");
+    const product = await makeProductWithVariants("Non Integer OnHand Add Variant", category.id, [
+      { size: "M", color: "Beige" },
+    ]);
+    const countBefore = await prisma.variant.count({ where: { productId: product.id } });
+
+    const response = await POST(
+      postRequest({ size: "L", color: "Beige", sku: `SKU-${randomUUID()}`, onHand: 2.5 }),
+      ctx(product.id),
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_request");
+
+    const countAfter = await prisma.variant.count({ where: { productId: product.id } });
+    expect(countAfter).toBe(countBefore);
   });
 
   it("returns 400 invalid_request for unparseable JSON", async () => {
@@ -160,33 +234,13 @@ describe("POST /api/admin/products/[id]/variants (integration, real Postgres)", 
     expect(body.error).toBe("invalid_request");
   });
 
-  it("returns 400 stock_not_editable when the body carries an onHand key, and creates no variant", async () => {
-    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
-    const category = await makeCategory("Stock Guard Add Variant");
-    const product = await makeProductWithVariants("Stock Guard Add Variant", category.id, [
-      { size: "M", color: "Beige" },
-    ]);
-    const countBefore = await prisma.variant.count({ where: { productId: product.id } });
-
-    const response = await POST(
-      postRequest({ size: "L", color: "Beige", sku: `SKU-${randomUUID()}`, onHand: 99 }),
-      ctx(product.id),
-    );
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error).toBe("stock_not_editable");
-
-    const countAfter = await prisma.variant.count({ where: { productId: product.id } });
-    expect(countAfter).toBe(countBefore);
-  });
-
-  it("returns 400 stock_not_editable when the body carries a held key", async () => {
+  it("returns 400 stock_not_editable when the body carries a held key, and creates no variant", async () => {
     mockedAuth.mockResolvedValueOnce(fakeAdminSession());
     const category = await makeCategory("Held Guard Add Variant");
     const product = await makeProductWithVariants("Held Guard Add Variant", category.id, [
       { size: "M", color: "Beige" },
     ]);
+    const countBefore = await prisma.variant.count({ where: { productId: product.id } });
 
     const response = await POST(
       postRequest({ size: "L", color: "Beige", sku: `SKU-${randomUUID()}`, held: 1 }),
@@ -196,6 +250,9 @@ describe("POST /api/admin/products/[id]/variants (integration, real Postgres)", 
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toBe("stock_not_editable");
+
+    const countAfter = await prisma.variant.count({ where: { productId: product.id } });
+    expect(countAfter).toBe(countBefore);
   });
 
   it("returns 401 with no session and mutates nothing", async () => {

@@ -309,7 +309,7 @@ export function ProductRow({
             <VariantRow key={variant.id} productId={product.id} variant={variant} />
           ))
         : null}
-      {expanded ? <AddVariantForm productId={product.id} /> : null}
+      {expanded ? <AddVariantForm productId={product.id} productName={product.name} /> : null}
       {showImages ? <ProductImages productId={product.id} images={product.images} /> : null}
     </>
   );
