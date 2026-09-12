@@ -1,17 +1,25 @@
 // In-store sale route ("Vender en local" — /admin/caja) — thin HTTP adapter
-// over stock.service.ts's sellInStore() (design.md D1). Not covered by
-// middleware.ts's matcher (see that file's module doc) — checks its own
-// session. Backs specs/inventory-stock/spec.md "In-store sale reduces
-// online-visible stock" and specs/admin-console/spec.md "Authenticated
-// Access". tasks.md 7.1/7.7.
+// over sale.service.ts's recordInStoreSale() (design.md D1), which composes
+// the existing sellInStore() (stock.service.ts, unchanged) with a Sale
+// write in one transaction. Not covered by middleware.ts's matcher (see
+// that file's module doc) — checks its own session. Backs
+// specs/inventory-stock/spec.md "In-store sale reduces online-visible
+// stock", specs/admin-console/spec.md "Authenticated Access", and
+// specs/sales-revenue/spec.md "In-Person Sale Recording" / "Sale rejected
+// without a payment method" / "Split payment is rejected". tasks.md
+// 7.1/7.7, control-de-caja tasks.md 2.4/2.5.
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { OutOfStockError, sellInStore } from "@/modules/inventory/stock.service";
+import { OutOfStockError } from "@/modules/inventory/stock.service";
+import { recordInStoreSale } from "@/modules/sales/sale.service";
+
+const PAYMENT_METHODS = new Set(["CASH", "TRANSFER"]);
 
 interface RawBody {
   variantId?: unknown;
   qty?: unknown;
+  paymentMethod?: unknown;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -32,15 +40,18 @@ export async function POST(request: Request): Promise<Response> {
     !body.variantId ||
     typeof body.qty !== "number" ||
     !Number.isInteger(body.qty) ||
-    body.qty <= 0
+    body.qty <= 0 ||
+    typeof body.paymentMethod !== "string" ||
+    !PAYMENT_METHODS.has(body.paymentMethod)
   ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
   try {
-    await sellInStore(prisma, {
+    await recordInStoreSale(prisma, {
       variantId: body.variantId,
       qty: body.qty,
+      paymentMethod: body.paymentMethod as "CASH" | "TRANSFER",
       actorId: session.user.id,
     });
     return NextResponse.json({ ok: true }, { status: 200 });

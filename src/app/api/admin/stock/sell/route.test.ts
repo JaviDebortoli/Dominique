@@ -29,6 +29,7 @@ describe("POST /api/admin/stock/sell (integration, real Postgres)", () => {
   const createdCategoryIds: string[] = [];
 
   afterAll(async () => {
+    await prisma.sale.deleteMany({ where: { variant: { productId: { in: createdProductIds } } } });
     await prisma.stockMovement.deleteMany({
       where: { variant: { productId: { in: createdProductIds } } },
     });
@@ -68,7 +69,9 @@ describe("POST /api/admin/stock/sell (integration, real Postgres)", () => {
     mockedAuth.mockResolvedValueOnce(fakeAdminSession());
     const variant = await makeVariant(5);
 
-    const response = await POST(jsonRequest({ variantId: variant.id, qty: 2 }));
+    const response = await POST(
+      jsonRequest({ variantId: variant.id, qty: 2, paymentMethod: "CASH" }),
+    );
 
     expect(response.status).toBe(200);
     const updated = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
@@ -80,7 +83,9 @@ describe("POST /api/admin/stock/sell (integration, real Postgres)", () => {
     const variant = await makeVariant(1);
     await hold(prisma, { variantId: variant.id, qty: 1 });
 
-    const response = await POST(jsonRequest({ variantId: variant.id, qty: 1 }));
+    const response = await POST(
+      jsonRequest({ variantId: variant.id, qty: 1, paymentMethod: "CASH" }),
+    );
 
     expect(response.status).toBe(409);
   });
@@ -89,6 +94,60 @@ describe("POST /api/admin/stock/sell (integration, real Postgres)", () => {
     mockedAuth.mockResolvedValueOnce(fakeAdminSession());
 
     const response = await POST(jsonRequest({ variantId: 123, qty: "two" }));
+
+    expect(response.status).toBe(400);
+  });
+
+  // control-de-caja tasks.md 2.4 — sales-revenue spec "Sale rejected without
+  // a payment method" / "Split payment is rejected".
+  it("records a Sale row with the chosen payment method (control-de-caja tasks.md 2.4)", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const variant = await makeVariant(5);
+
+    const response = await POST(
+      jsonRequest({ variantId: variant.id, qty: 1, paymentMethod: "TRANSFER" }),
+    );
+
+    expect(response.status).toBe(200);
+    const sale = await prisma.sale.findFirstOrThrow({ where: { variantId: variant.id } });
+    expect(sale.paymentMethod).toBe("TRANSFER");
+  });
+
+  it("rejects a request with no paymentMethod as 400 invalid_request, and does not create a Sale or decrement stock", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const variant = await makeVariant(5);
+
+    const response = await POST(jsonRequest({ variantId: variant.id, qty: 1 }));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_request");
+    const unchanged = await prisma.variant.findUniqueOrThrow({ where: { id: variant.id } });
+    expect(unchanged.onHand).toBe(5);
+    const sales = await prisma.sale.findMany({ where: { variantId: variant.id } });
+    expect(sales).toHaveLength(0);
+  });
+
+  it("rejects a request naming more than one payment method as 400 invalid_request", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const variant = await makeVariant(5);
+
+    const response = await POST(
+      jsonRequest({ variantId: variant.id, qty: 1, paymentMethod: ["CASH", "TRANSFER"] }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_request");
+  });
+
+  it("rejects an unrecognized paymentMethod value as 400 invalid_request", async () => {
+    mockedAuth.mockResolvedValueOnce(fakeAdminSession());
+    const variant = await makeVariant(5);
+
+    const response = await POST(
+      jsonRequest({ variantId: variant.id, qty: 1, paymentMethod: "BITCOIN" }),
+    );
 
     expect(response.status).toBe(400);
   });
