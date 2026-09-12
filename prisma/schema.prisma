@@ -82,6 +82,7 @@ model Variant {
 
   orderItems     OrderItem[]
   stockMovements StockMovement[]
+  sales          Sale[]
 
   @@unique([productId, size, color])
   @@index([productId])
@@ -97,6 +98,16 @@ model Variant {
 enum OrderMethod {
   MP
   PICKUP_CASH
+}
+
+// control-de-caja: efectivo or transferencia — the two in-person/pickup
+// settlement methods. MercadoPago orders never set this column (their
+// revenue bucket is derived from Order.method === "MP", see
+// caja-report.service.ts); it exists here only for Sale.paymentMethod and
+// Order.paymentMethod (D1/D3 in openspec/changes/control-de-caja/design.md).
+enum PaymentMethod {
+  CASH
+  TRANSFER
 }
 
 // PENDING_PAYMENT -> PAID | CANCELLED | EXPIRED   (MercadoPago path)
@@ -125,6 +136,11 @@ model Order {
   expiresAt  DateTime?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
+  // control-de-caja D3: set only for PICKUP_CASH orders, at the money-commit
+  // moment inside markPickedUp(). Null for MP orders (their method IS the
+  // revenue bucket) and for PICKUP_CASH orders picked up before this change
+  // shipped — no backfill, deliberately (design.md D3: "Backfill: none").
+  paymentMethod PaymentMethod?
 
   items          OrderItem[]
   payment        Payment?
@@ -203,8 +219,42 @@ model AdminUser {
   createdAt    DateTime @default(now())
 
   stockMovements StockMovement[]
+  sales          Sale[]  @relation("SaleActor")
+  voidedSales    Sale[]  @relation("SaleVoidedBy")
 
   @@map("admin_users")
+}
+
+// control-de-caja (sales-revenue spec, design.md D1/D2): one row per
+// in-person sale of a single variant, matching sellInStore()'s exact
+// granularity — no cart/header-detail concept. Written in the SAME
+// transaction as StockMovement(IN_STORE_SALE) by
+// src/modules/sales/sale.service.ts's recordInStoreSale(); never mutated
+// directly outside that module.
+model Sale {
+  id            String        @id @default(cuid())
+  variantId     String
+  variant       Variant       @relation(fields: [variantId], references: [id])
+  qty           Int
+  // Snapshot, mirrors OrderItem.unitPrice: variant.priceOverride ?? product.price
+  // resolved at sale time, never recomputed later.
+  unitPrice     Decimal       @db.Decimal(10, 2)
+  // Exactly one, never null: no split payments (sales-revenue spec "Split
+  // payment is rejected").
+  paymentMethod PaymentMethod
+  actorId       String?
+  actor         AdminUser?    @relation("SaleActor", fields: [actorId], references: [id])
+  soldAt        DateTime      @default(now())
+  // Null = counts as revenue (design.md D2 — mirrors Order.expiresAt's
+  // nullable-timestamp-as-state idiom). Set by voidSale(), together with
+  // voidedById, inside the same atomic claim UPDATE.
+  voidedAt      DateTime?
+  voidedById    String?
+  voidedBy      AdminUser?    @relation("SaleVoidedBy", fields: [voidedById], references: [id])
+
+  @@index([soldAt])
+  @@index([variantId])
+  @@map("sales")
 }
 
 // Seed default: Monday-Friday open, Saturday/Sunday closed=true (owner
