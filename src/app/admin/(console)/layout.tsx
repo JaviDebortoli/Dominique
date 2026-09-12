@@ -19,6 +19,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
           <Link href="/admin/productos">Productos</Link>
           <Link href="/admin/categorias">Categorías</Link>
           <Link href="/admin/pedidos">Pedidos</Link>
+          <Link href="/admin/reportes">Reportes</Link>
         </nav>
         <div className="flex items-center gap-4 font-sans text-body-md text-ink">
           {session?.user?.email ? <span className="text-outline">{session.user.email}</span> : null}
