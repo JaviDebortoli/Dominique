@@ -161,7 +161,7 @@ describe("mercadopago — buildPreferenceRequest (task 5.1, pure preference mapp
   });
 });
 
-describe("mercadopago — createMercadoPagoClient().createPreference (sandbox vs live init_point)", () => {
+describe("mercadopago — createMercadoPagoClient().createPreference (always init_point)", () => {
   const baseInput = {
     orderId: "order-123",
     publicCode: "DOM-ABCD1234",
@@ -178,7 +178,7 @@ describe("mercadopago — createMercadoPagoClient().createPreference (sandbox vs
     delete process.env.MP_ACCESS_TOKEN;
   });
 
-  it("prefers sandbox_init_point over init_point when the response includes both — sandbox credentials must never redirect buyers to the live checkout", async () => {
+  it("uses init_point even when the response also carries sandbox_init_point — MercadoPago removed the sandbox, test credentials run against init_point", async () => {
     preferenceCreateMock.mockResolvedValue({
       id: "pref-1",
       init_point: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
@@ -190,11 +190,11 @@ describe("mercadopago — createMercadoPagoClient().createPreference (sandbox vs
     const result = await client.createPreference(baseInput);
 
     expect(result.initPoint).toBe(
-      "https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
+      "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-1",
     );
   });
 
-  it("falls back to init_point when sandbox_init_point is absent (live/production credentials)", async () => {
+  it("uses init_point when sandbox_init_point is absent", async () => {
     preferenceCreateMock.mockResolvedValue({
       id: "pref-2",
       init_point: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-2",
