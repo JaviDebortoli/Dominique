@@ -21,6 +21,11 @@ export interface CheckoutFormItem {
 
 export interface CheckoutFormProps {
   items: CheckoutFormItem[];
+  /** odd/tasks/comprar-ahora.md T2/T3 — true when this checkout was reached
+   * via /checkout?variante=<id> (buy-now) rather than the cart. Wired
+   * through in T2; T3 makes it send `source: "buy-now"` so the API route
+   * skips clearCart() for this order. */
+  buyNow?: boolean;
 }
 
 type SubmitState =
