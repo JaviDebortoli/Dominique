@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SizeSelector } from "./SizeSelector";
@@ -8,7 +8,20 @@ import { SizeSelector } from "./SizeSelector";
 //     zero-stock)
 //   - "Locale and Copy" ("Sin stock" es-AR label)
 //   - "add-to-cart enabled only for selected in-stock variant" (tasks.md 3.4)
+//
+// "Comprar ahora" (buy-now, odd/tasks/comprar-ahora.md T1) navigates via
+// next/navigation's useRouter — mocked here mirroring OrderCancelButton.
+// test.tsx's pattern (a `push` spy replacing the real client-side router).
+const pushMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 describe("SizeSelector", () => {
+  beforeEach(() => {
+    pushMock.mockClear();
+  });
+
   const variants = [
     { id: "v-s", size: "S", available: 3, isAvailable: true },
     { id: "v-m", size: "M", available: 0, isAvailable: false },
@@ -105,5 +118,60 @@ describe("SizeSelector", () => {
     await user.click(screen.getByRole("button", { name: "S" }));
 
     expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
+  });
+
+  // odd/tasks/comprar-ahora.md T1 — "Comprar ahora" buys one unit of the
+  // selected variant directly, bypassing the cart entirely.
+  describe("Comprar ahora (buy-now)", () => {
+    it("keeps comprar ahora disabled until an in-stock size is selected", () => {
+      render(<SizeSelector variants={variants} />);
+
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeDisabled();
+    });
+
+    it("never enables comprar ahora for the zero-stock size", async () => {
+      render(<SizeSelector variants={variants} />);
+
+      await userEvent.setup().click(screen.getByRole("button", { name: "M" }));
+
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeDisabled();
+    });
+
+    it("enables comprar ahora for a selected in-stock variant even when inCartQty already reaches the cap (ignores the cart)", async () => {
+      const user = userEvent.setup();
+      render(<SizeSelector variants={variants} inCartQty={{ "v-s": 3 }} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeEnabled();
+    });
+
+    it("navigates to /checkout?variante=<id> for the selected variant when clicked", async () => {
+      const user = userEvent.setup();
+      render(<SizeSelector variants={variants} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /comprar ahora/i }));
+
+      expect(pushMock).toHaveBeenCalledWith("/checkout?variante=v-s");
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("triangulation: switching selection navigates using the newly selected variant's id", async () => {
+      const user = userEvent.setup();
+      const threeVariants = [
+        { id: "v-s", size: "S", available: 3, isAvailable: true },
+        { id: "v-l/needs encoding", size: "L", available: 1, isAvailable: true },
+      ];
+      render(<SizeSelector variants={threeVariants} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: "L" }));
+      await user.click(screen.getByRole("button", { name: /comprar ahora/i }));
+
+      expect(pushMock).toHaveBeenCalledWith(
+        `/checkout?variante=${encodeURIComponent("v-l/needs encoding")}`,
+      );
+    });
   });
 });
