@@ -34,7 +34,7 @@ type SubmitState =
   | { status: "success"; publicCode: string }
   | { status: "error"; message: string; conflictedLabels?: string[] };
 
-export function CheckoutForm({ items }: CheckoutFormProps) {
+export function CheckoutForm({ items, buyNow = false }: CheckoutFormProps) {
   const [buyerName, setBuyerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -57,6 +57,11 @@ export function CheckoutForm({ items }: CheckoutFormProps) {
           email,
           method,
           items: items.map((item) => ({ variantId: item.variantId, qty: item.qty })),
+          // odd/tasks/comprar-ahora.md T3 — tells the API to skip
+          // clearCart() for this order. `undefined` is dropped by
+          // JSON.stringify, so a regular cart checkout's body carries no
+          // "source" key at all.
+          source: buyNow ? "buy-now" : undefined,
         }),
       });
 

@@ -32,6 +32,7 @@ interface CheckoutRequestBody {
   email?: unknown;
   method?: unknown;
   items?: unknown;
+  source?: unknown;
 }
 
 interface ValidatedCheckoutRequest {
@@ -40,6 +41,10 @@ interface ValidatedCheckoutRequest {
   email: string;
   method: "MP" | "PICKUP_CASH";
   items: CheckoutLine[];
+  /** odd/tasks/comprar-ahora.md T3 — set only for a buy-now checkout
+   * (/checkout?variante=<id>). Controls nothing but whether this route
+   * clears the cart cookie afterwards; pricing/stock stay unaffected. */
+  source?: "buy-now";
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -91,13 +96,18 @@ type CheckoutValidationResult =
  * from stock re-validation, which order.service.ts owns.
  */
 function validateRequestBody(body: CheckoutRequestBody): CheckoutValidationResult {
+  // odd/tasks/comprar-ahora.md T3 — strict allowlist: only an absent source
+  // (undefined — a regular cart checkout) or the exact literal "buy-now"
+  // are accepted. Any other value is rejected as invalid_request rather
+  // than silently falling back to cart behavior.
   if (
     !isNonEmptyString(body.buyerName) ||
     !isNonEmptyString(body.phone) ||
     !isNonEmptyString(body.email) ||
     (body.method !== "MP" && body.method !== "PICKUP_CASH") ||
     !Array.isArray(body.items) ||
-    !body.items.every(isCheckoutLine)
+    !body.items.every(isCheckoutLine) ||
+    (body.source !== undefined && body.source !== "buy-now")
   ) {
     return { ok: false, failure: { reason: "shape" } };
   }
@@ -117,6 +127,7 @@ function validateRequestBody(body: CheckoutRequestBody): CheckoutValidationResul
       email: body.email,
       method: body.method,
       items: body.items,
+      source: body.source === "buy-now" ? "buy-now" : undefined,
     },
   };
 }
@@ -220,10 +231,16 @@ export async function POST(request: Request): Promise<Response> {
     // whatever Response this handler returns, so the Set-Cookie rides
     // either shape. try/catch-and-ignore: a failed cookie write must never
     // fail an already-created order (proposal.md's edge case).
-    try {
-      await clearCart();
-    } catch (error) {
-      console.error("Failed to clear cart after order creation", error);
+    //
+    // odd/tasks/comprar-ahora.md T3 (owner-confirmed) — a buy-now purchase
+    // must leave the shopper's existing cart cookie intact, so this is
+    // skipped entirely when source === "buy-now".
+    if (validated.source !== "buy-now") {
+      try {
+        await clearCart();
+      } catch (error) {
+        console.error("Failed to clear cart after order creation", error);
+      }
     }
 
     if (order.method === "MP") {

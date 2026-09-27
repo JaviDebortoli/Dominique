@@ -256,6 +256,31 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
     );
   });
 
+  // odd/tasks/comprar-ahora.md T3 — source is validated strictly: only
+  // undefined or the exact literal "buy-now" are accepted; any other value
+  // is rejected rather than silently treated as a regular cart checkout.
+  it("rejects an unrecognized source value with 400 invalid_request", async () => {
+    const variant = await makeVariant(2);
+
+    const response = await POST(
+      postRequest({
+        buyerName: "Cliente Source Malo",
+        phone: "3815550034",
+        email: "sourcemalo@example.com",
+        method: "PICKUP_CASH",
+        items: [{ variantId: variant.id, qty: 1 }],
+        source: "not-a-real-source",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_request");
+
+    const ordersForVariant = await prisma.orderItem.findMany({ where: { variantId: variant.id } });
+    expect(ordersForVariant).toHaveLength(0);
+  });
+
   it("rejects an empty cart with 400", async () => {
     const response = await POST(
       postRequest({
@@ -529,6 +554,34 @@ describe("POST /api/checkout (integration, real Postgres)", () => {
       const orderId = body.redirectUrl.split("/").pop()!;
       createdOrderIds.push(orderId);
       expect(store.get("dominique_cart")).toBe("[]");
+    });
+
+    // odd/tasks/comprar-ahora.md T3 — the owner-confirmed buy-now
+    // requirement: a buy-now purchase must leave the existing cart cookie
+    // intact, so the route must skip clearCart() when source === "buy-now".
+    it('does NOT clear the cart cookie when source is "buy-now"', async () => {
+      const variant = await makeVariant(2);
+      const store = mockCookieStore({
+        dominique_cart: JSON.stringify([{ variantId: "some-other-variant", qty: 3 }]),
+      });
+
+      const response = await POST(
+        postRequest({
+          buyerName: "Cliente Buy Now",
+          phone: "3815550033",
+          email: "buynow@example.com",
+          method: "PICKUP_CASH",
+          items: [{ variantId: variant.id, qty: 1 }],
+          source: "buy-now",
+        }),
+      );
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      createdOrderIds.push(body.orderId);
+      expect(store.get("dominique_cart")).toBe(
+        JSON.stringify([{ variantId: "some-other-variant", qty: 3 }]),
+      );
     });
 
     it("still creates the order successfully when the cart cookie write throws", async () => {
