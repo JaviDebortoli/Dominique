@@ -30,11 +30,19 @@ import { CheckoutForm, type CheckoutFormItem } from "@/components/storefront/Che
 // line (out of stock / exceeds stock) all bounce to /carrito rather than
 // rendering a payment form for something that can't actually be bought.
 interface CheckoutPageProps {
-  searchParams: Promise<{ variante?: string }>;
+  searchParams: Promise<{ variante?: string | string[] }>;
 }
 
 export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
   const { variante } = await searchParams;
+
+  // A repeated `?variante=a&variante=b` arrives as string[]. It is an
+  // ambiguous buy-now request, not a cart checkout: bounce instead of
+  // silently rendering (and later clearing) the cart.
+  if (Array.isArray(variante)) {
+    redirect("/carrito");
+  }
+
   const buyNow = typeof variante === "string" && variante.length > 0;
 
   const resolved = buyNow

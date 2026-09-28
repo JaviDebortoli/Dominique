@@ -231,5 +231,35 @@ describe("CheckoutPage (integration, real Postgres)", () => {
       ).rejects.toThrow("NEXT_REDIRECT");
       expect(mockedRedirect).toHaveBeenCalledWith("/carrito");
     });
+
+    it("redirects to /carrito when variante is repeated, instead of silently falling back to cart mode", async () => {
+      const category = await makeCategory("checkout-buy-now-repetida");
+      const suffix = randomUUID();
+      const cartProduct = await createProduct(prisma, {
+        name: `Producto Carrito Ok Tres ${suffix}`,
+        slug: `producto-carrito-ok-tres-${suffix}`,
+        price: 9000,
+        categoryId: category.id,
+        variants: [{ size: "U", color: "Negro", sku: `OKCART3-${suffix}`, onHand: 5 }],
+      });
+      createdProductIds.push(cartProduct.id);
+
+      // A perfectly valid cart is present — without the guard, a repeated
+      // `?variante=a&variante=b` (which Next hands over as string[]) would
+      // render this cart instead of redirecting.
+      mockCartCookie([{ variantId: cartProduct.variants[0].id, qty: 1 }]);
+      mockedRedirect.mockImplementationOnce(() => {
+        throw new Error("NEXT_REDIRECT");
+      });
+
+      await expect(
+        CheckoutPage({
+          searchParams: Promise.resolve({
+            variante: [cartProduct.variants[0].id, cartProduct.variants[0].id],
+          }),
+        }),
+      ).rejects.toThrow("NEXT_REDIRECT");
+      expect(mockedRedirect).toHaveBeenCalledWith("/carrito");
+    });
   });
 });

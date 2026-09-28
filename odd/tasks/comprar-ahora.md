@@ -54,3 +54,4 @@ Today the only purchase path is PDP -> "Agregar al carrito" -> /carrito -> /chec
 ## Next step
 - Re-run `npm run test:e2e -- e2e/comprar-ahora.spec.ts` once the stray `next dev` process on port 3000 is stopped (or run e2e in an environment without a conflicting dev server), then commit the spec file.
 - Native review (reliability lens): approved and acknowledged. Advisory follow-ups: run e2e live; assert cookies() not called in buy-now page test; repeated ?variante= (array) silently falls back to cart mode.
+- Fixed: repeated ?variante= (string[]) now redirects to /carrito (TDD: RED then GREEN, 7/7 page tests; tsc + eslint clean).
