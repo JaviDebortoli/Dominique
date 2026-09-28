@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 // Backs specs/storefront-browsing/spec.md:
 //   - "Product Detail Page Variant Selector" (enable in-stock size, disable
@@ -16,6 +17,13 @@ import { useState } from "react";
 // variant's available stock is enforced as a disable-with-named-reason —
 // once `inCartQty[selected.id]` already reaches `selected.available`, the
 // button disables and its label names why instead of silently no-op'ing.
+//
+// odd/tasks/comprar-ahora.md T1 — "Comprar ahora" buys the selected variant
+// directly (qty 1), bypassing the cart entirely: it is enabled purely off
+// `selected.isAvailable`, the in-cart cap above does NOT apply, and it
+// navigates client-side (useRouter) to /checkout?variante=<id> instead of
+// calling onAddToCart. Stock is re-validated server-side on that page/the
+// submit; this button only gates on the already-known isAvailable flag.
 
 export interface SizeOption {
   id: string;
@@ -33,11 +41,18 @@ export interface SizeSelectorProps {
 }
 
 export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSelectorProps) {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = variants.find((variant) => variant.id === selectedId) ?? null;
   const atCap = selected !== null && (inCartQty[selected.id] ?? 0) >= selected.available;
   const canAddToCart =
     selected !== null && selected.isAvailable && (inCartQty[selected.id] ?? 0) < selected.available;
+  const canBuyNow = selected !== null && selected.isAvailable;
+
+  function handleBuyNow() {
+    if (!selected) return;
+    router.push(`/checkout?variante=${encodeURIComponent(selected.id)}`);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -71,19 +86,34 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
           );
         })}
       </div>
-      <button
-        type="button"
-        disabled={!canAddToCart}
-        onClick={() => selected && onAddToCart?.(selected.id)}
-        className={[
-          "w-full px-8 py-3 font-sans text-label-caps uppercase tracking-widest",
-          canAddToCart
-            ? "bg-nude text-ink hover:opacity-90"
-            : "cursor-not-allowed bg-surface-container text-outline",
-        ].join(" ")}
-      >
-        {atCap ? "Ya tenés el máximo disponible" : "Agregar al carrito"}
-      </button>
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          disabled={!canAddToCart}
+          onClick={() => selected && onAddToCart?.(selected.id)}
+          className={[
+            "w-full px-8 py-3 font-sans text-label-caps uppercase tracking-widest",
+            canAddToCart
+              ? "bg-nude text-ink hover:opacity-90"
+              : "cursor-not-allowed bg-surface-container text-outline",
+          ].join(" ")}
+        >
+          {atCap ? "Ya tenés el máximo disponible" : "Agregar al carrito"}
+        </button>
+        <button
+          type="button"
+          disabled={!canBuyNow}
+          onClick={handleBuyNow}
+          className={[
+            "w-full border px-8 py-3 font-sans text-label-caps uppercase tracking-widest",
+            canBuyNow
+              ? "border-ink bg-paper text-ink hover:bg-surface-container"
+              : "cursor-not-allowed border-outline-variant bg-surface-container text-outline",
+          ].join(" ")}
+        >
+          Comprar ahora
+        </button>
+      </div>
     </div>
   );
 }

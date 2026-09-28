@@ -183,6 +183,57 @@ describe("CheckoutForm", () => {
   // tasks.md 1.4 — invalid_contact (400) uses the same generic body.message
   // renderer as stock_unavailable (lines 71-78): no dedicated UI branch is
   // needed for this new error code.
+  // odd/tasks/comprar-ahora.md T3 — buy-now checkouts must tell the API to
+  // skip clearCart() (the shopper's actual cart, untouched by this
+  // purchase, must survive it).
+  describe("Buy-now (buyNow prop)", () => {
+    it('sends source: "buy-now" in the body when buyNow is true', async () => {
+      const user = userEvent.setup();
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        status: 201,
+        redirected: false,
+        json: async () => ({ orderId: "order-1", publicCode: "DOM-ABC123" }),
+      });
+
+      render(<CheckoutForm items={items} buyNow />);
+
+      await user.type(screen.getByLabelText(/nombre/i), "Ana Pérez");
+      await user.type(screen.getByLabelText(/tel[eé]fono/i), "3815551234");
+      await user.type(screen.getByLabelText(/email/i), "ana@example.com");
+      await user.click(screen.getByRole("radio", { name: /reservar y pagar al retirar/i }));
+      await user.click(screen.getByRole("button", { name: /confirmar pedido/i }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const sentBody = JSON.parse((init as RequestInit).body as string);
+      expect(sentBody.source).toBe("buy-now");
+    });
+
+    it("omits source from the body for a regular cart checkout (buyNow false/absent)", async () => {
+      const user = userEvent.setup();
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        status: 201,
+        redirected: false,
+        json: async () => ({ orderId: "order-1", publicCode: "DOM-ABC123" }),
+      });
+
+      render(<CheckoutForm items={items} />);
+
+      await user.type(screen.getByLabelText(/nombre/i), "Ana Pérez");
+      await user.type(screen.getByLabelText(/tel[eé]fono/i), "3815551234");
+      await user.type(screen.getByLabelText(/email/i), "ana@example.com");
+      await user.click(screen.getByRole("radio", { name: /reservar y pagar al retirar/i }));
+      await user.click(screen.getByRole("button", { name: /confirmar pedido/i }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const sentBody = JSON.parse((init as RequestInit).body as string);
+      expect(sentBody.source).toBeUndefined();
+    });
+  });
+
   it("shows the invalid_contact error message returned by the API in role=alert (tasks.md 1.4)", async () => {
     const user = userEvent.setup();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({

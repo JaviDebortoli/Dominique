@@ -18,6 +18,14 @@ import ProductPage from "./page";
 // async-component-call harness is not — mirrors carrito/page.test.tsx's
 // pattern.
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
+// next/navigation's useRouter is mocked too: SizeSelector's "Comprar ahora"
+// (odd/tasks/comprar-ahora.md T1) calls it, and it throws outside a real
+// app router context (mirrors OrderCancelButton.test.tsx's pattern). This
+// file doesn't exercise buy-now navigation itself.
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => ({ push: vi.fn() }) };
+});
 const mockedCookies = vi.mocked(cookies);
 
 function mockCartCookie(items: { variantId: string; qty: number }[] | null = null) {

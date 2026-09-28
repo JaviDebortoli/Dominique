@@ -19,11 +19,46 @@ import { CheckoutForm, type CheckoutFormItem } from "@/components/storefront/Che
 // re-validation happens again on submit at the API layer — this page's line
 // list is for display only and is never trusted as the source of truth for
 // pricing or availability.
-export default async function CheckoutPage() {
-  const cart = await getCart();
-  const resolved = await resolveCartLines(prisma, cart);
+//
+// odd/tasks/comprar-ahora.md T2 — a `?variante=<id>` search param switches
+// this page to buy-now mode: it resolves a single qty-1 line for THAT
+// variant via the same resolveCartLines(prisma, ...) resolver (passing a
+// one-line synthetic cart instead of the cookie's), and the cart cookie is
+// never read at all in this mode — the owner's confirmed requirement that a
+// buy-now purchase must leave the shopper's actual cart untouched. Same
+// redirect rule as the cart flow: no line, a dropped line, or a blocking
+// line (out of stock / exceeds stock) all bounce to /carrito rather than
+// rendering a payment form for something that can't actually be bought.
+interface CheckoutPageProps {
+  searchParams: Promise<{ variante?: string | string[] }>;
+}
 
-  if (resolved.lines.length === 0 || resolved.dropped.length > 0) {
+export default async function CheckoutPage({ searchParams }: CheckoutPageProps) {
+  const { variante } = await searchParams;
+
+  // A repeated `?variante=a&variante=b` arrives as string[]. It is an
+  // ambiguous buy-now request, not a cart checkout: bounce instead of
+  // silently rendering (and later clearing) the cart.
+  if (Array.isArray(variante)) {
+    redirect("/carrito");
+  }
+
+  const buyNow = typeof variante === "string" && variante.length > 0;
+
+  const resolved = buyNow
+    ? await resolveCartLines(prisma, [{ variantId: variante, qty: 1 }])
+    : await resolveCartLines(prisma, await getCart());
+
+  // Buy-now additionally bounces on hasBlockingLines (out of stock /
+  // exceeds stock) — a single-line synthetic cart with no quantity stepper
+  // to fix it in place, unlike /carrito. The pre-existing cart-mode redirect
+  // rule stays exactly as it was ("Cart mode unchanged" — comprar-ahora.md
+  // T2): /carrito is the place a blocked cart line gets resolved.
+  const blocked = buyNow
+    ? resolved.lines.length === 0 || resolved.dropped.length > 0 || resolved.hasBlockingLines
+    : resolved.lines.length === 0 || resolved.dropped.length > 0;
+
+  if (blocked) {
     redirect("/carrito");
   }
 
@@ -39,7 +74,7 @@ export default async function CheckoutPage() {
       <h1 className="mb-6 font-serif text-headline-lg-mobile text-ink md:text-headline-lg">
         Finalizar compra
       </h1>
-      <CheckoutForm items={items} />
+      <CheckoutForm items={items} buyNow={buyNow} />
     </section>
   );
 }
