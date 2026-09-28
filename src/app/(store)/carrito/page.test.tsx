@@ -85,7 +85,7 @@ describe("CartPage (integration, real Postgres)", () => {
     render(await CartPage());
 
     expect(screen.getByText(product.name)).toBeInTheDocument();
-    expect(screen.getByText("Talle M")).toBeInTheDocument();
+    expect(screen.getByText("Talle M · Color Negro")).toBeInTheDocument();
     expect(screen.getByText(other.name)).toBeInTheDocument();
     // line totals: 20000*2 = 40000, 30000*1 = 30000
     expect(screen.getByText("$40.000")).toBeInTheDocument();

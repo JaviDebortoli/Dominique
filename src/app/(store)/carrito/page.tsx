@@ -74,7 +74,7 @@ export default async function CartPage() {
                 {line.productName}
               </Link>
               <p className="font-sans text-label-caps uppercase tracking-widest text-on-surface-variant">
-                Talle {line.size}
+                Talle {line.size} · Color {line.color}
               </p>
               {line.isUnavailable ? (
                 <p role="alert" className="font-sans text-body-md text-red-700">

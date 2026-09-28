@@ -25,10 +25,10 @@ test.describe("Cart journey: PDP → /carrito → /checkout → empty cart (task
   const productASlug = `producto-e2e-carrito-a-${suffix}`;
   const productBSlug = `producto-e2e-carrito-b-${suffix}`;
   // Matches cart-lines.ts's ResolvedCartLine.label format exactly
-  // (`${productName} — Talle ${size}`) — the single source of the label
+  // (`${productName} — Talle ${size} — Color ${color}`) — the single source of the label
   // used by /carrito's CartLineControls aria-labels and /checkout's line
   // items.
-  const labelA = `${productAName} — Talle M`;
+  const labelA = `${productAName} — Talle M — Color Unico`;
 
   let categoryId: string;
   let productAId: string;

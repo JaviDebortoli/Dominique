@@ -34,6 +34,7 @@ export default async function ProductPage({
     (variant) => ({
       id: variant.id,
       size: variant.size,
+      color: variant.color,
       available: variant.available,
       isAvailable: variant.isAvailable,
     }),
