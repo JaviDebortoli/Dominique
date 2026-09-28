@@ -13,6 +13,9 @@ export interface ProductCardData {
   price: number;
   thumbnailUrl: string | null;
   thumbnailAlt: string | null;
+  /** true when no variant of the product has available stock (sin-stock-
+   * badge feature) — derived via isProductSoldOut, never computed here. */
+  soldOut: boolean;
 }
 
 export function ProductCard({ product }: { product: ProductCardData }) {
@@ -36,6 +39,11 @@ export function ProductCard({ product }: { product: ProductCardData }) {
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
           />
         ) : null}
+        {product.soldOut && (
+          <span className="absolute right-2 top-2 z-10 bg-ink px-2 py-1 font-sans text-[10px] uppercase tracking-widest text-paper">
+            Sin stock
+          </span>
+        )}
       </div>
       <h3 className="mb-1 font-serif text-[18px] leading-tight text-ink">
         {product.name}

@@ -4,6 +4,7 @@ import {
   getCategoryBySlug,
   listProductsByCategory,
 } from "@/modules/catalog/category.service";
+import { isProductSoldOut } from "@/modules/catalog/variant-availability";
 import { ProductCard } from "@/components/storefront/ProductCard";
 
 // Category listing page. Backs specs/storefront-browsing/spec.md "Category
@@ -43,6 +44,7 @@ export default async function CategoryPage({
                 price: Number(product.price),
                 thumbnailUrl: product.images[0]?.url ?? null,
                 thumbnailAlt: product.images[0]?.altText ?? null,
+                soldOut: isProductSoldOut(product.variants),
               }}
             />
           ))}

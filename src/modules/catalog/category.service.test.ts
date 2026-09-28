@@ -96,6 +96,34 @@ describe("category.service (integration, real Postgres)", () => {
       expect(Number(listing[0].price)).toBe(18000);
       expect(listing[0].images[0]?.url).toBe("/uploads/cinturon.jpg");
     });
+
+    it("includes each variant's onHand/held stock counters (sin-stock-badge)", async () => {
+      const category = await makeCategory("stock-counters");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Campera Stock Counters",
+        slug: `campera-stock-counters-${suffix}`,
+        price: 30000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `CSC-S-NEG-${suffix}`, onHand: 5 },
+          { size: "M", color: "Negro", sku: `CSC-M-NEG-${suffix}`, onHand: 2 },
+        ],
+      });
+      createdProductIds.push(product.id);
+
+      const listing = await listProductsByCategory(prisma, category.slug);
+
+      expect(listing).toHaveLength(1);
+      expect(listing[0].variants).toHaveLength(2);
+      expect(listing[0].variants).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ onHand: 5, held: 0 }),
+          expect.objectContaining({ onHand: 2, held: 0 }),
+        ]),
+      );
+    });
   });
 
   describe("getCategoryBySlug", () => {

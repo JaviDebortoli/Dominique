@@ -210,6 +210,34 @@ describe("product.service (integration, real Postgres)", () => {
       expect(curated).toHaveLength(1);
       expect(curated[0].id).toBe(newer.id);
     });
+
+    it("includes each variant's onHand/held stock counters (sin-stock-badge)", async () => {
+      const category = await makeCategory("curados-stock");
+      const suffix = randomUUID();
+
+      const product = await createProduct(prisma, {
+        name: "Producto Curado Stock",
+        slug: `producto-curado-stock-${suffix}`,
+        price: 30000,
+        categoryId: category.id,
+        variants: [
+          { size: "S", color: "Negro", sku: `PCS-S-NEG-${suffix}`, onHand: 4 },
+          { size: "M", color: "Negro", sku: `PCS-M-NEG-${suffix}`, onHand: 0 },
+        ],
+      });
+      createdProductIds.push(product.id);
+
+      const curated = await listCuratedProducts(prisma, { take: 1 });
+
+      expect(curated).toHaveLength(1);
+      expect(curated[0].variants).toHaveLength(2);
+      expect(curated[0].variants).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ onHand: 4, held: 0 }),
+          expect.objectContaining({ onHand: 0, held: 0 }),
+        ]),
+      );
+    });
   });
 
   describe("getProductBySlug — PDP lookup", () => {

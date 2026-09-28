@@ -15,6 +15,7 @@ import type {
   ProductImage,
   Variant,
 } from "@/generated/prisma/client";
+import type { StockCounters } from "./variant-availability";
 
 // Product/variant edit+delete path — admin-productos-edicion change
 // (design.md F1-F9). Mirrors category.service.ts's error-class shape: every
@@ -431,14 +432,21 @@ export function isProductIncomplete(product: { images: unknown[] }): boolean {
   return product.images.length === 0;
 }
 
-export type CuratedProduct = Product & { images: ProductImage[] };
+export type CuratedProduct = Product & {
+  images: ProductImage[];
+  // Only the two counters isProductSoldOut needs (sin-stock-badge) — not a
+  // full Variant include, to keep the listing query lean.
+  variants: StockCounters[];
+};
 
 /**
  * Lists the most recently created products for the home page's "curated"
  * section (specs/storefront-browsing/spec.md "Home Page Layout"). There is
  * no manual curation flag in the schema (see design.md's Data Model
  * Sketch) — newest-first is the simplest data-driven stand-in and matches
- * listProductsByCategory's existing ordering convention.
+ * listProductsByCategory's existing ordering convention. Also loads every
+ * variant's stock counters so the card can derive its "Sin stock" badge via
+ * isProductSoldOut (variant-availability.ts) without a second query.
  */
 export async function listCuratedProducts(
   prisma: PrismaClient,
@@ -447,7 +455,10 @@ export async function listCuratedProducts(
   return prisma.product.findMany({
     orderBy: { createdAt: "desc" },
     take: options.take ?? 4,
-    include: { images: { orderBy: { position: "asc" }, take: 1 } },
+    include: {
+      images: { orderBy: { position: "asc" }, take: 1 },
+      variants: { select: { onHand: true, held: true } },
+    },
   });
 }
 

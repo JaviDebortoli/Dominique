@@ -32,6 +32,15 @@ export function isVariantAvailable(counters: StockCounters): boolean {
 }
 
 /**
+ * A product is sold out when none of its variants has available stock. A
+ * product with zero variants also counts as sold out — there is nothing
+ * purchasable either way. Backs the catalog cards' "Sin stock" badge.
+ */
+export function isProductSoldOut(variants: StockCounters[]): boolean {
+  return !variants.some((variant) => isVariantAvailable(variant));
+}
+
+/**
  * Per-variant availability breakdown for a product's variant list. Each
  * variant is evaluated independently, so one sold-out size never affects
  * the availability of sibling sizes/colors (spec: "One size sold out,

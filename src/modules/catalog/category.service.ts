@@ -18,6 +18,7 @@
 // "Category Association" test, still passing).
 
 import type { Category, PrismaClient, Product, ProductImage } from "@/generated/prisma/client";
+import type { StockCounters } from "./variant-availability";
 
 // Category write path — admin-categorias change (design.md C1/C2/C3).
 // Mirrors product.service.ts's createProduct/DuplicateVariantError shape:
@@ -204,11 +205,19 @@ export async function getCategoryBySlug(
   return prisma.category.findUnique({ where: { slug } });
 }
 
-export type ProductListItem = Product & { images: ProductImage[] };
+export type ProductListItem = Product & {
+  images: ProductImage[];
+  // Only the two counters isProductSoldOut needs (sin-stock-badge) — not a
+  // full Variant include, to keep the listing query lean.
+  variants: StockCounters[];
+};
 
 /**
  * Lists the products assigned to a single category, identified by slug,
- * each with its first image (thumbnail) for the storefront listing.
+ * each with its first image (thumbnail) for the storefront listing, plus
+ * every variant's stock counters so the card can derive its "Sin stock"
+ * badge via isProductSoldOut (variant-availability.ts) without a second
+ * query.
  * Returns an empty array both when the category has no products and when
  * the slug does not resolve to any category — callers that need to
  * distinguish "unknown category" from "empty category" should call
@@ -221,7 +230,10 @@ export async function listProductsByCategory(
   return prisma.product.findMany({
     where: { category: { slug: categorySlug } },
     orderBy: { createdAt: "desc" },
-    include: { images: { orderBy: { position: "asc" }, take: 1 } },
+    include: {
+      images: { orderBy: { position: "asc" }, take: 1 },
+      variants: { select: { onHand: true, held: true } },
+    },
   });
 }
 
