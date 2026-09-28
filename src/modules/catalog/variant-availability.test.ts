@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getAvailableStock,
+  isProductSoldOut,
   isVariantAvailable,
   summarizeVariantAvailability,
 } from "./variant-availability";
@@ -46,5 +47,29 @@ describe("summarizeVariantAvailability — Per-Variant Stock scenario", () => {
 
     expect(bySize.get("L")?.isAvailable).toBe(true);
     expect(bySize.get("L")?.available).toBe(2);
+  });
+});
+
+describe("isProductSoldOut (pure)", () => {
+  it("is sold out when every variant has zero available stock", () => {
+    const variants = [
+      { onHand: 2, held: 2 },
+      { onHand: 3, held: 3 },
+    ];
+
+    expect(isProductSoldOut(variants)).toBe(true);
+  });
+
+  it("is NOT sold out when at least one variant has available stock", () => {
+    const variants = [
+      { onHand: 2, held: 2 },
+      { onHand: 5, held: 1 },
+    ];
+
+    expect(isProductSoldOut(variants)).toBe(false);
+  });
+
+  it("is sold out when the product has zero variants", () => {
+    expect(isProductSoldOut([])).toBe(true);
   });
 });
