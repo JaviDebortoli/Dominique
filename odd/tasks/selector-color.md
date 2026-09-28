@@ -68,3 +68,5 @@ Each variant is a size + color pair, but `SizeSelector` renders one button per v
 - Feature complete; ready for the parent's full-suite run and review.
 - Parent: full `npm test` 586/586 passed on a1f64fa.
 - Parent fix: /carrito visible line text now shows "Talle {size} · Color {color}" (was size only; two colors of one size looked identical). TDD: RED (carrito page test) then GREEN; e2e label constants updated to the new cart-lines label format (not run live). tsc + eslint clean.
+- Follow-up done: test for a multi-color size whose colors are all sold out (size disabled, single "Sin stock", no color step, purchase disabled). Characterization test: behavior already existed; mutation check (forcing isSizeAvailable=true) made it fail, then restored. 19/19 SizeSelector tests pass.
+- Review follow-up: rewrote that test to drop the no-op click on a disabled button and scope "Sin stock" to the XL size container, with a self-contained fixture (M mixed, XL all sold out). Mutation checks (isSizeAvailable forced true; some -> every) both fail it; source restored.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SizeSelector } from "./SizeSelector";
 
@@ -220,6 +220,26 @@ describe("SizeSelector", () => {
 
       await user.click(screen.getByRole("button", { name: /agregar al carrito/i }));
       expect(onAddToCart).toHaveBeenCalledWith("v-s-verde");
+    });
+
+    it("disables a multi-color size and labels it Sin stock when every one of its colors is sold out", () => {
+      // M mixes a sold-out and an available color; XL has only sold-out
+      // colors. Only XL's size button may be disabled and labeled.
+      const variantsWithSoldOutSize = [
+        { id: "v-m-negro", size: "M", color: "Negro", available: 4, isAvailable: true },
+        { id: "v-m-blanco", size: "M", color: "Blanco", available: 0, isAvailable: false },
+        { id: "v-xl-negro", size: "XL", color: "Negro", available: 0, isAvailable: false },
+        { id: "v-xl-blanco", size: "XL", color: "Blanco", available: 0, isAvailable: false },
+      ];
+      render(<SizeSelector variants={variantsWithSoldOutSize} />);
+
+      const xl = screen.getByRole("button", { name: "XL" });
+      expect(xl).toBeDisabled();
+      expect(within(xl.parentElement!).getByText("Sin stock")).toBeInTheDocument();
+
+      const m = screen.getByRole("button", { name: "M" });
+      expect(m).toBeEnabled();
+      expect(within(m.parentElement!).queryByText("Sin stock")).not.toBeInTheDocument();
     });
   });
 
