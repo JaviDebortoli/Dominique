@@ -24,9 +24,9 @@ Catalog cards (`ProductCard`) carry no stock data today; shoppers only discover 
 - Branch: `feat/sin-stock-badge` (from `main`, independent of `feat/comprar-ahora`). Strategy: `ask-on-risk`. Forecast: ~150 authored changed lines.
 
 ## Tasks
-- [ ] T1 — Pure helper `isProductSoldOut(variants)` in `variant-availability.ts` + unit tests.
-- [ ] T2 — Listing queries include variant counters; tests in the service test files.
-- [ ] T3 — `ProductCard` `soldOut` badge + component test; wire both pages (page tests if present).
+- [x] T1 — Pure helper `isProductSoldOut(variants)` in `variant-availability.ts` + unit tests. Commit: `00863e2`.
+- [x] T2 — Listing queries include variant counters; tests in the service test files. Commit: `eb34360`.
+- [x] T3 — `ProductCard` `soldOut` badge + component test; wire both pages (page tests if present). Commit: `520a3af`.
 
 ## Route per task
 - Delegated direct (writer trigger: 2+ non-trivial files).
@@ -40,6 +40,10 @@ Catalog cards (`ProductCard`) carry no stock data today; shoppers only discover 
 
 ## Progress
 - Exploration done; branch created.
+- T1: `isProductSoldOut` added to variant-availability.ts with unit tests (RED then GREEN, 8/8 passing). Commit `00863e2`.
+- T2: `listProductsByCategory`/`listCuratedProducts` select `variants: { onHand, held }`; `ProductListItem`/`CuratedProduct` types updated; integration tests added (RED then GREEN, 61/61 passing in the two service test files). Commit `eb34360`.
+- T3: `ProductCard` gets `soldOut: boolean`, renders "Sin stock" badge top-right (absolute right-2 top-2, bg-ink/text-paper, label-caps style) when true; card stays a link. `ProductCard.test.tsx` added (RED then GREEN, 3/3 passing). Both pages wired with `soldOut: isProductSoldOut(product.variants)`; existing page tests (`(store)/page.test.tsx`, `categoria/[slug]/page.test.tsx`) still pass unmodified (products in those fixtures have stock, so no badge assertion was needed to keep them green). Commit `520a3af`.
+- Verification: `npx tsc --noEmit` clean; `npm run lint` — only the 2 known pre-existing AddVariantForm.tsx errors; full `npm test` exceeded the 120s foreground timeout, so ran targeted subset instead (all touched test files + `src/app/(store)` page tests) — all passing.
 
 ## Next step
-- T1–T3 via one delegated writer.
+- Feature complete; branch ready for PR/review at the user's discretion.
