@@ -221,6 +221,28 @@ describe("SizeSelector", () => {
       await user.click(screen.getByRole("button", { name: /agregar al carrito/i }));
       expect(onAddToCart).toHaveBeenCalledWith("v-s-verde");
     });
+
+    it("disables a multi-color size and labels it Sin stock when every one of its colors is sold out", async () => {
+      const user = userEvent.setup();
+      const allColorsSoldOutForSize = [
+        ...sizeColorVariants,
+        { id: "v-xl-negro", size: "XL", color: "Negro", available: 0, isAvailable: false },
+        { id: "v-xl-blanco", size: "XL", color: "Blanco", available: 0, isAvailable: false },
+      ];
+      render(<SizeSelector variants={allColorsSoldOutForSize} />);
+
+      const xl = screen.getByRole("button", { name: "XL" });
+      expect(xl).toBeDisabled();
+      // Sizes M and L each keep at least one available color, so XL is the
+      // only size-level "Sin stock" label before any size is selected.
+      expect(screen.getAllByText("Sin stock")).toHaveLength(1);
+
+      await user.click(xl);
+
+      expect(screen.queryByRole("group", { name: "Color" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /agregar al carrito/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeDisabled();
+    });
   });
 
   // odd/tasks/comprar-ahora.md T1 — "Comprar ahora" buys one unit of the
