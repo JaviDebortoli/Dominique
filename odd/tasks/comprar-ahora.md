@@ -28,7 +28,7 @@ Today the only purchase path is PDP -> "Agregar al carrito" -> /carrito -> /chec
 - [x] T1 — `SizeSelector`: "Comprar ahora" button -> navigates to `/checkout?variante=<id>`; same enable rules as add-to-cart availability (not the in-cart cap). Tests in `SizeSelector.test.tsx`. Commit: `fec9dc1`.
 - [x] T2 — `/checkout` page: honor `?variante=`; resolve via `resolveCartLines(prisma, [{ variantId, qty: 1 }])`; redirect to `/carrito` when unresolvable/blocked; pass `buyNow` to `CheckoutForm`. Tests in checkout page tests. Commit: `a6b2e71`.
 - [x] T3 — `CheckoutForm` sends `source: "buy-now"` when `buyNow`; `POST /api/checkout` skips `clearCart()` for `source === "buy-now"`. Tests in `CheckoutForm.test.tsx` and `route.test.ts`. Commit: `f8595b2`.
-- [x] T4 — e2e: buy now from PDP reaches checkout with only that item and leaves the cart intact. Spec written (`e2e/comprar-ahora.spec.ts`); one run attempted — blocked by a pre-existing environmental issue (see Progress), not exercised against a live server. Commit: `fd75210`.
+- [ ] T4 (pending live run) — e2e: buy now from PDP reaches checkout with only that item and leaves the cart intact. Spec written (`e2e/comprar-ahora.spec.ts`); one run attempted — blocked by a pre-existing environmental issue (see Progress), not exercised against a live server. Commit: `fd75210`.
 
 ## Route per task
 - Delegated direct (writer trigger: 2+ non-trivial files across T1–T4).
@@ -53,3 +53,4 @@ Today the only purchase path is PDP -> "Agregar al carrito" -> /carrito -> /chec
 
 ## Next step
 - Re-run `npm run test:e2e -- e2e/comprar-ahora.spec.ts` once the stray `next dev` process on port 3000 is stopped (or run e2e in an environment without a conflicting dev server), then commit the spec file.
+- Native review (reliability lens): approved and acknowledged. Advisory follow-ups: run e2e live; assert cookies() not called in buy-now page test; repeated ?variante= (array) silently falls back to cart mode.
