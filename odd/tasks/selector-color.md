@@ -27,8 +27,8 @@ Each variant is a size + color pair, but `SizeSelector` renders one button per v
 - Branch: `feat/selector-color` (from `main`). Strategy: `ask-on-risk`. Forecast: ~250 authored changed lines.
 
 ## Tasks
-- [ ] T1 — Selector logic + UI: distinct sizes, color step, auto-select single color, buttons act on selected variant. Tests in `SizeSelector.test.tsx` (multi-color size, sold-out color disabled, auto-select, size change resets color, buy-now/add-to-cart use the right variant id).
-- [ ] T2 — PDP passes `color`; update `producto/[slug]/page.test.tsx` if needed. Cart/checkout label includes color if missing (with test).
+- [x] T1 — Selector logic + UI: distinct sizes, color step, auto-select single color, buttons act on selected variant. Tests in `SizeSelector.test.tsx` (multi-color size, sold-out color disabled, auto-select, size change resets color, buy-now/add-to-cart use the right variant id). Commit: `818a026`.
+- [x] T2 — PDP passes `color`; `producto/[slug]/page.test.tsx` needed no change (fixtures already included color). Cart/checkout label was missing color in `cart-lines.ts`; added, with test. Commit: `42defe4`.
 
 ## Route per task
 - Delegated direct (writer trigger: 2+ non-trivial files).
@@ -42,6 +42,27 @@ Each variant is a size + color pair, but `SizeSelector` renders one button per v
 
 ## Progress
 - Exploration done; branch created.
+- T1 done: `SizeSelector.tsx` now renders distinct size buttons (dedup by
+  first appearance), then a `role="group" aria-label="Color"` step for the
+  selected size's variants, auto-selecting when a size has exactly one
+  color. Both purchase buttons act on the resulting size+color variant id.
+  `SizeSelector.test.tsx` updated (existing fixtures gained a single `color`
+  per size, preserving old behavior via auto-select) and extended with a
+  `size + color two-step selection` describe block. RED: 6 failed/12 passed
+  (new tests failing against pre-T1 component). GREEN: 18/18 passed.
+- T2 done: `producto/[slug]/page.tsx` now maps `color` into the variant
+  options passed to `SizeSelector`; its integration test needed no changes
+  (fixtures already created variants with `color`). `cart-lines.ts`'s
+  `ResolvedCartLine.label` was missing color (`"{name} — Talle {size}"`
+  only) — it's used for `CartLineControls`' aria-labels and the checkout
+  form/409 variantId→label mapping, not for /carrito's or /checkout's
+  visible "Talle {size}" text, which stays as-is (out of scope per this
+  doc's "verify in cart-lines.ts" note). New label:
+  `"{name} — Talle {size} — Color {color}"`. RED: 1 failed/8 passed.
+  GREEN: 9/9 passed.
+- Full target suite (`SizeSelector`, `(store)` app dir, `cart`):
+  16 files / 101 tests passed. `npm run lint`: only the 2 known pre-existing
+  `AddVariantForm.tsx` errors. `npx tsc --noEmit`: clean.
 
 ## Next step
-- T1–T2 via one delegated writer.
+- Feature complete; ready for the parent's full-suite run and review.
