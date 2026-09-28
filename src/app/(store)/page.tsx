@@ -3,6 +3,7 @@ import {
   listCategoriesWithThumbnail,
 } from "@/modules/catalog/category.service";
 import { listCuratedProducts } from "@/modules/catalog/product.service";
+import { isProductSoldOut } from "@/modules/catalog/variant-availability";
 import { CategoryTile } from "@/components/storefront/CategoryTile";
 import { ProductCard } from "@/components/storefront/ProductCard";
 
@@ -81,6 +82,7 @@ export default async function Home() {
                   price: Number(product.price),
                   thumbnailUrl: product.images[0]?.url ?? null,
                   thumbnailAlt: product.images[0]?.altText ?? null,
+                  soldOut: isProductSoldOut(product.variants),
                 }}
               />
             ))}
