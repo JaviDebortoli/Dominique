@@ -23,8 +23,10 @@ export interface ResolvedCartLine {
   productSlug: string;
   productName: string;
   size: string;
-  /** `${productName} — Talle ${size}` — the single source of the label used
-   * by /carrito, /checkout, AND the 409 variantId→label lookup. */
+  color: string;
+  /** `${productName} — Talle ${size} — Color ${color}` — the single source
+   * of the label used by /carrito, /checkout, AND the 409 variantId→label
+   * lookup. */
   label: string;
   unitPrice: number;
   qty: number;
@@ -88,7 +90,8 @@ export async function resolveCartLines(
       productSlug: variant.product.slug,
       productName: variant.product.name,
       size: variant.size,
-      label: `${variant.product.name} — Talle ${variant.size}`,
+      color: variant.color,
+      label: `${variant.product.name} — Talle ${variant.size} — Color ${variant.color}`,
       unitPrice: Number(variant.priceOverride ?? variant.product.price),
       qty: item.qty,
       available,

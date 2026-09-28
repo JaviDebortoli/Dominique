@@ -73,7 +73,8 @@ describe("resolveCartLines", () => {
     expect(line.productName).toBe("Vestido Lino");
     expect(line.productSlug).toBe("vestido-lino");
     expect(line.size).toBe("M");
-    expect(line.label).toBe("Vestido Lino — Talle M");
+    expect(line.color).toBe("Negro");
+    expect(line.label).toBe("Vestido Lino — Talle M — Color Negro");
     expect(line.unitPrice).toBe(45000);
     expect(line.qty).toBe(2);
     expect(result.subtotal).toBe(90000);
