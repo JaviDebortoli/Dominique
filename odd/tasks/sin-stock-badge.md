@@ -47,3 +47,5 @@ Catalog cards (`ProductCard`) carry no stock data today; shoppers only discover 
 
 ## Next step
 - Feature complete; branch ready for PR/review at the user's discretion.
+- Parent full-suite run: `npm test` 565/567; the 2 failures were in `order.service.test.ts` (untouched), pglite proxy `08P01` under load; that file alone passes 44/44.
+- Native review (reliability lens): approved and acknowledged. Advisory follow-up: page-level tests with a sold-out fixture for home and category pages.
