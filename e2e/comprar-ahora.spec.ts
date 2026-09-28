@@ -23,9 +23,9 @@ test.describe("Buy-now journey: add A to cart, buy B directly, cart A survives (
   const productASlug = `producto-e2e-comprar-ahora-a-${suffix}`;
   const productBSlug = `producto-e2e-comprar-ahora-b-${suffix}`;
   // Matches cart-lines.ts's ResolvedCartLine.label format exactly
-  // (`${productName} — Talle ${size}`) — the single source of the label
+  // (`${productName} — Talle ${size} — Color ${color}`) — the single source of the label
   // used by /carrito and /checkout.
-  const labelB = `${productBName} — Talle U`;
+  const labelB = `${productBName} — Talle U — Color Unico`;
 
   let categoryId: string;
   let productAId: string;
