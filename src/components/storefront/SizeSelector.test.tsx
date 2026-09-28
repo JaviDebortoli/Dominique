@@ -5,7 +5,8 @@ import { SizeSelector } from "./SizeSelector";
 
 // Backs specs/storefront-browsing/spec.md:
 //   - "Product Detail Page Variant Selector" (enable in-stock, disable
-//     zero-stock)
+//     zero-stock, size -> color two-step selection with real-time
+//     per-variant stock)
 //   - "Locale and Copy" ("Sin stock" es-AR label)
 //   - "add-to-cart enabled only for selected in-stock variant" (tasks.md 3.4)
 //
@@ -22,9 +23,12 @@ describe("SizeSelector", () => {
     pushMock.mockClear();
   });
 
+  // Single-color-per-size fixtures: odd/tasks/selector-color.md's "single-
+  // color products behave as today" — selecting a size auto-selects its
+  // only color, so these mirror the pre-color-step flow one-for-one.
   const variants = [
-    { id: "v-s", size: "S", available: 3, isAvailable: true },
-    { id: "v-m", size: "M", available: 0, isAvailable: false },
+    { id: "v-s", size: "S", color: "Negro", available: 3, isAvailable: true },
+    { id: "v-m", size: "M", color: "Negro", available: 0, isAvailable: false },
   ];
 
   it("keeps add to cart disabled until an in-stock size is selected, then enables it", async () => {
@@ -68,8 +72,8 @@ describe("SizeSelector", () => {
     const user = userEvent.setup();
     const onAddToCart = vi.fn();
     const threeVariants = [
-      { id: "v-s", size: "S", available: 3, isAvailable: true },
-      { id: "v-l", size: "L", available: 1, isAvailable: true },
+      { id: "v-s", size: "S", color: "Negro", available: 3, isAvailable: true },
+      { id: "v-l", size: "L", color: "Negro", available: 1, isAvailable: true },
     ];
     render(<SizeSelector variants={threeVariants} onAddToCart={onAddToCart} />);
 
@@ -120,6 +124,105 @@ describe("SizeSelector", () => {
     expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
   });
 
+  // odd/tasks/selector-color.md T1 — size -> color two-step selection.
+  describe("size + color two-step selection", () => {
+    const sizeColorVariants = [
+      { id: "v-m-negro", size: "M", color: "Negro", available: 4, isAvailable: true },
+      { id: "v-m-blanco", size: "M", color: "Blanco", available: 0, isAvailable: false },
+      { id: "v-l-rojo", size: "L", color: "Rojo", available: 2, isAvailable: true },
+      { id: "v-l-azul", size: "L", color: "Azul", available: 1, isAvailable: true },
+    ];
+
+    it("shows one Talle button per distinct size, not one per variant", () => {
+      render(<SizeSelector variants={sizeColorVariants} />);
+
+      expect(screen.getAllByRole("button", { name: "M" })).toHaveLength(1);
+      expect(screen.getAllByRole("button", { name: "L" })).toHaveLength(1);
+    });
+
+    it("shows a Color group with one button per color of the selected size (multi-color size)", async () => {
+      const user = userEvent.setup();
+      render(<SizeSelector variants={sizeColorVariants} />);
+
+      expect(screen.queryByRole("group", { name: "Color" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "M" }));
+
+      const colorGroup = screen.getByRole("group", { name: "Color" });
+      expect(colorGroup).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Negro" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Blanco" })).toBeInTheDocument();
+    });
+
+    it("disables a sold-out color and labels it Sin stock, without enabling purchase buttons", async () => {
+      const user = userEvent.setup();
+      render(<SizeSelector variants={sizeColorVariants} />);
+
+      await user.click(screen.getByRole("button", { name: "M" }));
+
+      const blanco = screen.getByRole("button", { name: "Blanco" });
+      expect(blanco).toBeDisabled();
+      expect(screen.getByText("Sin stock")).toBeInTheDocument();
+
+      await user.click(blanco);
+
+      expect(screen.getByRole("button", { name: /agregar al carrito/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeDisabled();
+    });
+
+    it("enables purchase buttons and acts on the selected size+color variant once an available color is chosen", async () => {
+      const user = userEvent.setup();
+      const onAddToCart = vi.fn();
+      render(<SizeSelector variants={sizeColorVariants} onAddToCart={onAddToCart} />);
+
+      await user.click(screen.getByRole("button", { name: "M" }));
+      const negro = screen.getByRole("button", { name: "Negro" });
+      expect(negro).toBeEnabled();
+      await user.click(negro);
+      expect(negro).toHaveAttribute("aria-pressed", "true");
+
+      const addToCart = screen.getByRole("button", { name: /agregar al carrito/i });
+      expect(addToCart).toBeEnabled();
+      await user.click(addToCart);
+      expect(onAddToCart).toHaveBeenCalledWith("v-m-negro");
+
+      await user.click(screen.getByRole("button", { name: /comprar ahora/i }));
+      expect(pushMock).toHaveBeenCalledWith("/checkout?variante=v-m-negro");
+    });
+
+    it("changing size resets the color selection when the new size has more than one color", async () => {
+      const user = userEvent.setup();
+      render(<SizeSelector variants={sizeColorVariants} />);
+
+      await user.click(screen.getByRole("button", { name: "M" }));
+      await user.click(screen.getByRole("button", { name: "Negro" }));
+      expect(screen.getByRole("button", { name: /agregar al carrito/i })).toBeEnabled();
+
+      await user.click(screen.getByRole("button", { name: "L" }));
+
+      expect(screen.getByRole("button", { name: /agregar al carrito/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /comprar ahora/i })).toBeDisabled();
+    });
+
+    it("auto-selects the only color when a size has exactly one color, enabling purchase buttons immediately", async () => {
+      const user = userEvent.setup();
+      const onAddToCart = vi.fn();
+      const singleColorForSize = [
+        ...sizeColorVariants,
+        { id: "v-s-verde", size: "S", color: "Verde", available: 5, isAvailable: true },
+      ];
+      render(<SizeSelector variants={singleColorForSize} onAddToCart={onAddToCart} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+
+      expect(screen.getByRole("button", { name: "Verde" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /agregar al carrito/i })).toBeEnabled();
+
+      await user.click(screen.getByRole("button", { name: /agregar al carrito/i }));
+      expect(onAddToCart).toHaveBeenCalledWith("v-s-verde");
+    });
+  });
+
   // odd/tasks/comprar-ahora.md T1 — "Comprar ahora" buys one unit of the
   // selected variant directly, bypassing the cart entirely.
   describe("Comprar ahora (buy-now)", () => {
@@ -160,8 +263,14 @@ describe("SizeSelector", () => {
     it("triangulation: switching selection navigates using the newly selected variant's id", async () => {
       const user = userEvent.setup();
       const threeVariants = [
-        { id: "v-s", size: "S", available: 3, isAvailable: true },
-        { id: "v-l/needs encoding", size: "L", available: 1, isAvailable: true },
+        { id: "v-s", size: "S", color: "Negro", available: 3, isAvailable: true },
+        {
+          id: "v-l/needs encoding",
+          size: "L",
+          color: "Negro",
+          available: 1,
+          isAvailable: true,
+        },
       ];
       render(<SizeSelector variants={threeVariants} />);
 
