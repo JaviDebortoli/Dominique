@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:test:setup": "tsx scripts/setup-test-db.ts"
   },
   "dependencies": {

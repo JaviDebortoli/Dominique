@@ -27,7 +27,7 @@
 // real owner can always log back in once the window rolls over, a correct
 // attempt clears the count, or the process restarts. Safe as process-local
 // state because this app runs as a single PM2 fork-mode process, never
-// clustered (deploy/ecosystem.config.js) — every request hits the same Map.
+// clustered (deploy/ecosystem.config.cjs) — every request hits the same Map.
 
 const WINDOW_MS = 60_000;
 const MAX_FAILURES_PER_WINDOW = 5;

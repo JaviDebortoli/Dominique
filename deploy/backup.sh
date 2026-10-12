@@ -10,8 +10,11 @@
 # DATABASE_URL set in the environment (source the app's .env, or export it
 # directly in the cron/systemd-timer unit's environment).
 #
+# DATABASE_URL may carry Prisma's `?schema=public` suffix (as in .env); the
+# script strips the query string itself and never logs the password.
+#
 # Usage:
-#   DATABASE_URL=postgres://user:pass@host:5432/db ./backup.sh
+#   DATABASE_URL=postgres://user:pass@host:5432/db bash backup.sh
 #
 # Optional env overrides:
 #   BACKUP_DIR        Where dumps are written (default: /var/backups/dominique)
@@ -41,8 +44,17 @@ mkdir -p "$BACKUP_DIR"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dump_file="$BACKUP_DIR/dominique-${timestamp}.sql"
 
-echo "backup.sh: dumping ${DATABASE_URL%%\?*} -> ${dump_file}"
-pg_dump "$DATABASE_URL" --no-owner --no-privileges --format=plain -f "$dump_file"
+# libpq (pg_dump) rejects URI query parameters it does not know, such as
+# Prisma's `?schema=public` that .env keeps for the app. Strip the whole
+# query string before handing the URL to pg_dump.
+pg_url="${DATABASE_URL%%\?*}"
+
+# Log only host/port/db: drop everything up to the last "@" (the userinfo,
+# which carries the password) so the password never reaches the backup log.
+log_target="${pg_url##*@}"
+
+echo "backup.sh: dumping ${log_target} -> ${dump_file}"
+pg_dump "$pg_url" --no-owner --no-privileges --format=plain -f "$dump_file"
 
 if [ ! -s "$dump_file" ]; then
   echo "backup.sh: dump file is empty — treating as a failed backup" >&2

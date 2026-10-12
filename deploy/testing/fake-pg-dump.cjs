@@ -54,6 +54,45 @@ function parseArgs(argv) {
   return { connectionString, outFile };
 }
 
+// Query parameters libpq accepts in a connection URI (a subset is enough
+// for this test double). Anything else, notably Prisma's `schema`, makes
+// the real pg_dump fail with `invalid URI query parameter: "<name>"`.
+const LIBPQ_URI_PARAMS = new Set([
+  "host",
+  "hostaddr",
+  "port",
+  "dbname",
+  "user",
+  "password",
+  "passfile",
+  "connect_timeout",
+  "application_name",
+  "options",
+  "sslmode",
+  "sslcert",
+  "sslkey",
+  "sslrootcert",
+  "service",
+  "target_session_attrs",
+]);
+
+// Mimics libpq: reject unknown URI query parameters, then hand the driver a
+// URI without the query string.
+function validateLibpqUri(connectionString) {
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) return connectionString;
+  const queryStart = connectionString.indexOf("?");
+  if (queryStart === -1) return connectionString;
+  const params = new URLSearchParams(connectionString.slice(queryStart + 1));
+  for (const name of params.keys()) {
+    if (!LIBPQ_URI_PARAMS.has(name)) {
+      process.stderr.write(`pg_dump: error: invalid URI query parameter: "${name}"
+`);
+      process.exit(1);
+    }
+  }
+  return connectionString.slice(0, queryStart);
+}
+
 function quoteIdent(name) {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -111,7 +150,8 @@ function serializeValue(value, column) {
 }
 
 async function main() {
-  const { connectionString, outFile } = parseArgs(process.argv.slice(2));
+  const { connectionString: rawConnectionString, outFile } = parseArgs(process.argv.slice(2));
+  const connectionString = validateLibpqUri(rawConnectionString);
   const client = new Client({ connectionString });
   await client.connect();
 

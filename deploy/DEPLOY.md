@@ -126,7 +126,13 @@ Install exact locked dependencies and build:
 ```bash
 cd /var/dominique/releases/current
 npm ci
+npx prisma generate
 ```
+
+`npx prisma generate` creates the Prisma client in `src/generated/prisma`.
+That directory is gitignored, so a fresh clone does not have it, and both
+the seed script (step 5) and `npm run build` (step 6) fail without it. Run
+it again after every `npm ci` on a new release (step 11).
 
 (`npm run build` happens in step 6, after `.env` and the DB are ready —
 Next.js's build step touches the database for statically-prerendered
@@ -165,17 +171,44 @@ Fill in, at minimum:
 
 - `DATABASE_URL` — `postgresql://dominique:CHOOSE_A_STRONG_PASSWORD@localhost:5432/dominique?schema=public` (the user/password from step 1c).
 - `MP_ACCESS_TOKEN` / `MP_WEBHOOK_SECRET` — production values from MercadoPago (see `.env.example`'s comments for exactly where to get these).
-- `NEXT_PUBLIC_BASE_URL` — your real HTTPS domain, e.g. `https://dominique.example.com` (must match what you'll issue the certificate for in step 8 — MercadoPago will call this URL for webhooks, and it cannot be `localhost`).
+- `NEXT_PUBLIC_BASE_URL` — your real HTTPS domain, e.g. `https://dominique.example.com` (must match what you'll issue the certificate for in step 8 — MercadoPago will call this URL for webhooks, and it cannot be `localhost`). Until a domain exists you can temporarily use `http://<server-ip>`. This value is inlined at build time, so changing it later requires a new `npm run build` and `pm2 restart dominique`.
 - `AUTH_SECRET` — generate a fresh one for this environment, never reuse the repo's dev value:
   ```bash
   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
   ```
 - `UPLOAD_DIR` — set this to `/var/dominique/uploads` (the directory from step 3). **This is what points the app at the real production upload path instead of the local-dev default (`public/uploads/products`)** — see `.env.example`'s comment on this var and `app/api/admin/upload/route.ts`'s module doc for the full rationale. The URL returned to browsers is always `/uploads/products/<name>` either way; only the on-disk write location changes, and `deploy/nginx.conf`'s `/uploads/` alias is what actually serves files from `/var/dominique/uploads` in production.
 
-Leave `ADMIN_SEED_EMAIL`/`ADMIN_SEED_PASSWORD` commented out unless you're
-about to run step 5's seed step to provision the real first admin account —
-see that section and `.env.example`'s comments for the full rotation
-procedure.
+Notes on writing `.env` safely:
+
+- If you create the file from the shell instead of an editor, use a quoted
+  heredoc (`<<'EOF'`) so characters such as `$` in passwords are not
+  expanded by the shell:
+  ```bash
+  cat > .env <<'EOF'
+  DATABASE_URL="postgresql://dominique:PASSWORD@localhost:5432/dominique?schema=public"
+  # ...the other variables...
+  EOF
+  ```
+- URL-encode special characters in the database password inside
+  `DATABASE_URL` (for example `@` becomes `%40`, `/` becomes `%2F`,
+  `:` becomes `%3A`, `?` becomes `%3F`, `#` becomes `%23`). Avoiding
+  special characters in the DB password is simpler still.
+- Restrict the file, since it holds secrets: `chmod 600 .env`.
+- Keep `?schema=public` in `DATABASE_URL`: Prisma needs it. `psql` and
+  `pg_dump` (libpq) reject it with `invalid URI query parameter: "schema"`,
+  so for those tools use the URL with the suffix removed.
+
+Check that the database is reachable with the credentials in `.env`
+(this strips `?schema=public` for `psql`):
+
+```bash
+psql "$(grep DATABASE_URL .env | cut -d'"' -f2 | sed 's/?schema=public//')" -c 'select 1'
+```
+
+It should print a one-row result with the value `1`.
+
+Leave `ADMIN_SEED_EMAIL`/`ADMIN_SEED_PASSWORD` out of `.env`: step 5 passes
+them on the command line for the one-time admin bootstrap instead.
 
 ---
 
@@ -190,32 +223,42 @@ This applies every migration in `prisma/migrations/` in order — safe to
 re-run (it no-ops for already-applied migrations), which is exactly what
 makes it safe to run again on every future deploy too.
 
-**Seeding**: `prisma/seed.ts`'s catalog/store-hours fixtures are dev-only —
-do NOT run a bare `npm run db:seed` in production, it will create sample
-products. The one part of the seed script you DO want in production is
-`seedAdminUser()`, to provision the real first admin login. To run only
-that safely:
+**Seeding**: `prisma/seed.ts` (`npm run db:seed`) loads dev-only catalog
+fixtures and, without `ADMIN_SEED_*`, a fixture admin — do NOT run it in
+production. Use the admin-only bootstrap instead: `npm run db:seed:admin`
+(`prisma/seed-admin.ts`) runs only the store hours and the admin account,
+with no catalog fixtures, and exits with an error if `ADMIN_SEED_EMAIL` or
+`ADMIN_SEED_PASSWORD` is missing, so it can never create the dev fixture
+admin (`admin@dominique.local`).
 
 ```bash
+cd /var/dominique/releases/current
 ADMIN_SEED_EMAIL="owner@dominique-real-domain.com" \
-ADMIN_SEED_PASSWORD="choose-a-strong-unique-password" \
-npm run db:seed
+ADMIN_SEED_PASSWORD='choose-a-strong-unique-password' \
+npm run db:seed:admin
 ```
 
-With those two env vars set, `seedAdminUser()` bcrypt-hashes
-`ADMIN_SEED_PASSWORD` and upserts that admin account instead of creating
-the dev fixture (`admin@dominique.local`) — see `.env.example`'s comments
-for the full explanation. **This still runs the rest of the seed script
-too** (catalog/store-hours fixtures) — if you don't want sample products in
-production, add your real `Category`/`Product`/`Variant` rows through the
-admin console (`/admin/productos/nuevo`) once you're logged in instead, and
-only ever use this seed invocation for the one-time admin bootstrap.
+Use single quotes around the password and do not put a single quote inside
+it. The script bcrypt-hashes the password and upserts the admin by email.
+Add your real `Category`/`Product`/`Variant` rows through the admin console
+(`/admin/productos/nuevo`) once you're logged in.
 
-Immediately after, unset those two env vars (don't leave them in `.env`) so
-a later `db:seed` run doesn't silently re-provision:
+Verify the admin exists (the table is `admin_users`; the Prisma model
+`AdminUser` is mapped to it with `@@map`). Use the same stripped URL as in
+step 4:
 
 ```bash
-# Make sure ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD are NOT left in .env.
+psql "$(grep DATABASE_URL .env | cut -d'"' -f2 | sed 's/?schema=public//')" -c 'SELECT email FROM admin_users;'
+```
+
+To rotate the password, re-run the same command with the same
+`ADMIN_SEED_EMAIL` and a new `ADMIN_SEED_PASSWORD`. There is no in-app
+password-change UI, so this is the only way to change it.
+
+Keep `ADMIN_SEED_*` out of `.env` (they are passed on the command line
+above) so a later seed run doesn't silently re-provision:
+
+```bash
 grep ADMIN_SEED .env   # should print nothing (or only commented-out lines)
 ```
 
@@ -239,12 +282,17 @@ touches the DB for statically-prerendered pages like the home page).
 
 ```bash
 cd /var/dominique/releases/current
-pm2 start deploy/ecosystem.config.js
+mkdir -p /var/log/dominique   # PM2 writes its logs here; it must exist first
+pm2 start deploy/ecosystem.config.cjs
 pm2 save
 pm2 startup   # follow the printed instructions to enable PM2 on boot
 ```
 
-**Do not change `instances` in `deploy/ecosystem.config.js` from `1`, and
+The PM2 config is a `.cjs` file because this repo's `package.json` has
+`"type": "module"`, which makes a plain `.js` file an ES module; the config
+uses `module.exports` and `__dirname`, which only work in CommonJS.
+
+**Do not change `instances` in `deploy/ecosystem.config.cjs` from `1`, and
 do not switch it to cluster mode.** See that file's own module doc for why:
 the expiry-reservation sweep (`src/jobs/expire-reservations.ts`, design.md
 D6) runs as an in-process `node-cron` job started once per Node process —
@@ -263,6 +311,25 @@ curl -sI http://127.0.0.1:3000/   # should return HTTP/1.1 200
 ---
 
 ## 8. Nginx site config + Certbot
+
+### IP-only (no domain yet)
+
+If you do not have a domain yet, you can still put Nginx in front of the
+app using the server IP:
+
+- Use the server IP as `server_name` (in the `sed` below, replace
+  `YOUR_REAL_DOMAIN` with the IP) and use `http://<server-ip>` in the
+  verification commands instead of `https://YOUR_REAL_DOMAIN`.
+- Skip Certbot: certificates cannot be issued for a bare IP address.
+- MercadoPago webhooks require HTTPS, so online payments must wait until a
+  domain and certificate exist.
+
+To switch to a domain later: create the DNS `A` record, replace the IP in
+`server_name` with the domain in `/etc/nginx/sites-available/dominique.conf`
+(`nginx -t && systemctl reload nginx`), run `certbot --nginx -d
+YOUR_REAL_DOMAIN`, set `NEXT_PUBLIC_BASE_URL` in `.env` to
+`https://YOUR_REAL_DOMAIN`, then run `npm run build` and
+`pm2 restart dominique`.
 
 Copy the config and point it at your real domain:
 
@@ -380,18 +447,21 @@ mkdir -p /var/backups/dominique
 Add a nightly cron job (03:00 local time — adjust as you like):
 
 ```bash
-cat > /etc/cron.d/dominique-backup <<'EOF'
-0 3 * * * root DATABASE_URL="postgresql://dominique:CHOOSE_A_STRONG_PASSWORD@localhost:5432/dominique?schema=public" /var/dominique/releases/current/deploy/backup.sh >> /var/log/dominique/backup.log 2>&1
-EOF
 mkdir -p /var/log/dominique
+cat > /etc/cron.d/dominique-backup <<'EOF'
+0 3 * * * root DATABASE_URL="$(grep DATABASE_URL /var/dominique/releases/current/.env | cut -d'"' -f2)" bash /var/dominique/releases/current/deploy/backup.sh >> /var/log/dominique/backup.log 2>&1
+EOF
 ```
 
-Use the SAME `DATABASE_URL` value you put in `.env` in step 4. Test it
+The job reads `DATABASE_URL` from the release's `.env`, so the password is
+not duplicated in the cron file. `backup.sh` strips the `?schema=public`
+suffix itself (libpq rejects it) and never writes the password to its log.
+It is invoked with `bash` so the file's exec bit does not matter. Test it
 manually once before trusting the cron job:
 
 ```bash
-DATABASE_URL="postgresql://dominique:CHOOSE_A_STRONG_PASSWORD@localhost:5432/dominique?schema=public" \
-  /var/dominique/releases/current/deploy/backup.sh
+DATABASE_URL="$(grep DATABASE_URL /var/dominique/releases/current/.env | cut -d'"' -f2)" \
+  bash /var/dominique/releases/current/deploy/backup.sh
 ls -la /var/backups/dominique
 ```
 
@@ -418,7 +488,10 @@ You should see a file named `dominique-<UTC timestamp>.sql`.
 
 Repeat steps 2 (clone into a NEW timestamped directory), 4 (copy `.env`
 from the previous release directory — don't regenerate secrets), 5
-(`prisma migrate deploy` — safe/idempotent), and 6 (`npm run build`), then:
+(`prisma migrate deploy` — safe/idempotent), and 6 (`npm run build`).
+In the new directory, run `npm ci` and `npx prisma generate` (step 2)
+BEFORE `npm run build`: the generated client is gitignored, so each fresh
+clone needs it. Skip the admin seed (it was a one-time bootstrap). Then:
 
 ```bash
 ln -sfn /var/dominique/releases/<new-timestamped-dir> /var/dominique/releases/current
@@ -441,7 +514,7 @@ repoint Nginx to the previous release dir + restore last `pg_dump`"):
    cd /var/dominique/releases/current
    pm2 restart dominique
    ```
-   PM2's process definition (`deploy/ecosystem.config.js`) uses `cwd:
+   PM2's process definition (`deploy/ecosystem.config.cjs`) uses `cwd:
    __dirname + "/.."` resolved from wherever `pm2 start` was originally run
    — if `current` is a symlink PM2 already resolved at start time, a
    `pm2 restart` reuses the ORIGINAL resolved path, not a re-resolution of
@@ -451,7 +524,7 @@ repoint Nginx to the previous release dir + restore last `pg_dump`"):
    ```bash
    pm2 delete dominique
    cd /var/dominique/releases/current   # now pointing at the previous release
-   pm2 start deploy/ecosystem.config.js
+   pm2 start deploy/ecosystem.config.cjs
    pm2 save
    ```
 

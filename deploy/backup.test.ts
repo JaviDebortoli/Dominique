@@ -32,7 +32,7 @@
 // and backup.sh runs completely unmodified against it — this test never
 // touches backup.sh's own source, only the PATH it resolves `pg_dump`
 // through.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -173,6 +173,56 @@ describe("deploy/backup.sh (tasks.md 8.3, real Postgres — dump-and-restore rou
       expect(restoredCounts).toEqual(sourceCounts);
     } finally {
       await restoreClient.end();
+    }
+  }, 30_000);
+
+  it("produces a valid dump when DATABASE_URL carries Prisma's ?schema=public (libpq rejects it)", () => {
+    const urlWithSchema = `${databaseUrl.split("?")[0]}?schema=public`;
+    const dir = mkdtempSync(path.join(tmpdir(), "dominique-backups-schema-"));
+    try {
+      const output = execFileSync("bash", [BACKUP_SCRIPT], {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          DATABASE_URL: urlWithSchema,
+          BACKUP_DIR: dir,
+          PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+        },
+        encoding: "utf8",
+      });
+      expect(output).toContain("backup.sh: done ->");
+      const dumps = readdirSync(dir).filter((f: string) => f.endsWith(".sql"));
+      expect(dumps).toHaveLength(1);
+      expect(readFileSync(path.join(dir, dumps[0]), "utf8").length).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("never prints the database password to stdout or stderr", () => {
+    const password = decodeURIComponent(new URL(databaseUrl).password);
+    expect(password, "DATABASE_URL must contain a password for this check").toBeTruthy();
+    const dir = mkdtempSync(path.join(tmpdir(), "dominique-backups-redact-"));
+    try {
+      const result = spawnSync("bash", [BACKUP_SCRIPT], {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          DATABASE_URL: `${databaseUrl.split("?")[0]}?schema=public`,
+          BACKUP_DIR: dir,
+          PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+        },
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(0);
+      // Match the userinfo form, since the local password ("postgres") also
+      // appears legitimately as the user name and in host/db names.
+      const leak = `:${password}@`;
+      expect(result.stdout).not.toContain(leak);
+      expect(result.stderr).not.toContain(leak);
+      expect(result.stdout).toContain("backup.sh: dumping");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
 

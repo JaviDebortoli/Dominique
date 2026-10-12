@@ -11,7 +11,7 @@
 //                      and status excluded ⇒ rule 4 holds)
 //
 // D6: run as node-cron inside the single PM2 process (no cluster mode —
-// deploy/ecosystem.config.js, Phase 8), so there is never more than one
+// deploy/ecosystem.config.cjs, Phase 8), so there is never more than one
 // sweep running concurrently and no leader-election mechanism is needed.
 // scheduleExpireReservationsSweep() is wired once at server startup via
 // src/instrumentation.ts's register() hook.
