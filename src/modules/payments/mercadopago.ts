@@ -19,8 +19,8 @@
 //
 // CREDENTIALS: MP_ACCESS_TOKEN / MP_WEBHOOK_SECRET are read from env (see
 // .env.example for where to obtain them: developers.mercadopago.com.ar).
-// No live sandbox credentials exist in this repo yet — createMercadoPagoClient()
-// throws MissingMercadoPagoCredentialsError until the owner sets them up.
+// createMercadoPagoClient() throws MissingMercadoPagoCredentialsError until
+// the owner sets them up.
 // Every test in this module and webhook.service.test.ts/order.service.test.ts
 // injects a test-double MercadoPagoClient instead of calling the real SDK,
 // so signature validation, idempotency, and state-transition logic are
@@ -183,14 +183,18 @@ export function createMercadoPagoClient(): MercadoPagoClient {
           "MercadoPago preference response is missing id/init_point — cannot redirect to checkout.",
         );
       }
-      // Prefer sandbox_init_point when the response carries one: MercadoPago
-      // only populates it for sandbox-capable (test) credentials, so a real
-      // production credential falls through to init_point unchanged. Using
-      // init_point unconditionally would send every buyer — even one paying
-      // with a documented sandbox test card — to the REAL, live checkout,
-      // which correctly rejects those test cards instead of completing a
-      // test purchase.
-      return { preferenceId: response.id, initPoint: response.sandbox_init_point ?? response.init_point };
+      // Always init_point, never sandbox_init_point. MercadoPago's own GitHub
+      // integration guide (github.com/mercadopago/mercadopago-claude-marketplace,
+      // plugins/mercadopago/skills/mp-integrate/SKILL.md) states the sandbox
+      // was removed: test and production runs both use init_point, and only
+      // the loaded credentials make a run a test (the app's test credentials
+      // plus a test-user buyer logging in at checkout).
+      // CAVEAT: the developers.mercadopago.com.ar Checkout Pro page
+      // (checkout-pro-preferences/create-payment-preference) still lists
+      // sandbox_init_point. Previous behavior preferred it (commit 4120bb5)
+      // and sandbox payments never completed; confirm this choice with an
+      // end-to-end test purchase before relying on it.
+      return { preferenceId: response.id, initPoint: response.init_point };
     },
     async getPayment(paymentId) {
       const response = await paymentClient.get({ id: paymentId });
