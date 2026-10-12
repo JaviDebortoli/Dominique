@@ -46,3 +46,4 @@ Following `deploy/DEPLOY.md` literally on the VPS failed or misled in several pl
 
 ## Progress
 - Created 2026-10-11. T1 done (commit 179c088; RED: 4 backup tests failed with `invalid URI query parameter` before the fix; GREEN: deploy suite 5/5). T2 done (commit 557cc59). T3 done (commit 579f408; adds `db:seed:admin` + `prisma/seed-admin.ts` + guard test). Next: review/delivery.
+- Native review (4 lenses, high risk, consent granted): approved and acknowledged 2026-10-11, lineage review-8d50bb0788cebe6b. Non-blocking follow-ups: cron/psql `grep DATABASE_URL` should anchor to `^DATABASE_URL=` (comments in .env break it); rollback to a release older than the .cjs rename must use `ecosystem.config.js`; IP-only mode sends admin login over plain HTTP; seed password lands in shell history; `backup.sh` strips all query params (incl. `sslmode`); `seed-admin.ts` main path untested. Lint: 2 pre-existing errors on main (`AddVariantForm.tsx:170`).
