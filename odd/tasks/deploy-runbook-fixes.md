@@ -45,4 +45,4 @@ Following `deploy/DEPLOY.md` literally on the VPS failed or misled in several pl
 - `npm test`, `npm run lint`, `npx tsc --noEmit`.
 
 ## Progress
-- Created 2026-10-11. T1 done (commit 179c088; RED: 4 backup tests failed with `invalid URI query parameter` before the fix; GREEN: deploy suite 5/5). T2 done (commit 557cc59). T3 done (adds `db:seed:admin` + `prisma/seed-admin.ts` + guard test). Next: review/delivery.
+- Created 2026-10-11. T1 done (commit 179c088; RED: 4 backup tests failed with `invalid URI query parameter` before the fix; GREEN: deploy suite 5/5). T2 done (commit 557cc59). T3 done (commit 579f408; adds `db:seed:admin` + `prisma/seed-admin.ts` + guard test). Next: review/delivery.
