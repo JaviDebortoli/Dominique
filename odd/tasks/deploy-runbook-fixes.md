@@ -30,7 +30,7 @@ Following `deploy/DEPLOY.md` literally on the VPS failed or misled in several pl
 
 ## Tasks
 - [x] T1 — `backup.sh` strips URI query params before `pg_dump` and redacts the password in its log line; fake `pg_dump` rejects unknown URI params like libpq; tests cover both.
-- [ ] T2 — Rename PM2 config to `deploy/ecosystem.config.cjs`; update references.
+- [x] T2 — Rename PM2 config to `deploy/ecosystem.config.cjs`; update references.
 - [ ] T3 — `DEPLOY.md` corrections listed in Scope.
 
 ## Route per task
@@ -45,4 +45,4 @@ Following `deploy/DEPLOY.md` literally on the VPS failed or misled in several pl
 - `npm test`, `npm run lint`, `npx tsc --noEmit`.
 
 ## Progress
-- Created 2026-10-11. T1 done (RED: 4 backup tests failed with `invalid URI query parameter` before the fix; GREEN: deploy suite 5/5). Next: T2.
+- Created 2026-10-11. T1 done (commit 179c088; RED: 4 backup tests failed with `invalid URI query parameter` before the fix; GREEN: deploy suite 5/5). T2 done. Next: T3.

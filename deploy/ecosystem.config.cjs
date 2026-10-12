@@ -1,9 +1,12 @@
 // PM2 process definition for Dominique (tasks.md 8.2, design.md "Technical
 // Approach": "One Next.js process on a DonWeb VPS: PM2 → Nginx → Certbot").
 //
+// Note: .cjs because package.json is "type": "module", which makes a .js
+// file ESM and breaks `module.exports`/`__dirname`.
+//
 // Usage (see deploy/DEPLOY.md for the full runbook):
 //   npm ci && npm run build
-//   pm2 start deploy/ecosystem.config.js
+//   pm2 start deploy/ecosystem.config.cjs
 //   pm2 save && pm2 startup   # persist across VPS reboots
 //
 // D6 — instances MUST stay 1, cluster mode MUST stay off:
