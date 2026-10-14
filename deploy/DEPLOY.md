@@ -495,7 +495,20 @@ clone needs it. Skip the admin seed (it was a one-time bootstrap). Then:
 
 ```bash
 ln -sfn /var/dominique/releases/<new-timestamped-dir> /var/dominique/releases/current
-pm2 restart dominique
+pm2 delete dominique
+cd /var/dominique/releases/current
+pm2 start deploy/ecosystem.config.cjs
+pm2 save
+```
+
+Do not use `pm2 restart dominique` here. `deploy/ecosystem.config.cjs`
+sets `cwd: __dirname + "/.."`, which PM2 resolves to the real release
+directory when the process is first started. A `restart` reuses that
+stored path, so it keeps serving the PREVIOUS release even after `current`
+points at the new one. Confirm the new release is the one running:
+
+```bash
+pm2 describe dominique | grep "exec cwd"   # must show <new-timestamped-dir>
 ```
 
 Take a manual backup (step 9's command) immediately before this, in
@@ -511,22 +524,14 @@ repoint Nginx to the previous release dir + restore last `pg_dump`"):
 1. **Repoint to the previous release directory:**
    ```bash
    ln -sfn /var/dominique/releases/<previous-timestamped-dir> /var/dominique/releases/current
-   cd /var/dominique/releases/current
-   pm2 restart dominique
-   ```
-   PM2's process definition (`deploy/ecosystem.config.cjs`) uses `cwd:
-   __dirname + "/.."` resolved from wherever `pm2 start` was originally run
-   — if `current` is a symlink PM2 already resolved at start time, a
-   `pm2 restart` reuses the ORIGINAL resolved path, not a re-resolution of
-   the symlink. To be certain the previous release's build/code is what
-   actually starts, delete and re-start the process pointed at the new
-   symlink target instead of trusting `restart` alone:
-   ```bash
    pm2 delete dominique
    cd /var/dominique/releases/current   # now pointing at the previous release
    pm2 start deploy/ecosystem.config.cjs
    pm2 save
+   pm2 describe dominique | grep "exec cwd"   # must show <previous-timestamped-dir>
    ```
+   As in step 11, do not use `pm2 restart` alone: it reuses the release
+   path PM2 resolved at start time and keeps serving the bad release.
 
 2. **Restore the last known-good backup**, if the bad release also wrote
    bad data (skip this if the rollback is purely code/config and the data
