@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { prisma } from "@/lib/db";
 import { createProduct } from "@/modules/catalog/product.service";
 import { recordInStoreSale } from "@/modules/sales/sale.service";
@@ -55,7 +55,10 @@ describe("/admin/reportes (integration, real Postgres)", () => {
     // Appears twice: the Efectivo bucket row AND the grand total row (this
     // is the only revenue this test seeded).
     expect(screen.getAllByText(/\$\s?7\.000/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(product.name)).toBeInTheDocument();
+    const soldProductsTable = screen.getByRole("table", { name: "Productos vendidos en el período" });
+    const todaysSalesTable = screen.getByRole("table", { name: "Ventas de hoy" });
+    expect(within(soldProductsTable).getByText(product.name)).toBeInTheDocument();
+    expect(within(todaysSalesTable).getByText(product.name)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Anular" })).toBeInTheDocument();
   });
 

@@ -85,11 +85,98 @@ export function mergeRevenue(sales: SaleForMerge[], orders: OrderForMerge[]): Me
   return { totals, grandTotal, inPerson, fromOrders };
 }
 
+export interface SoldLineForMerge {
+  variantId: string;
+  productName: string;
+  size: string;
+  color: string;
+  qty: number;
+  unitPrice: Prisma.Decimal | number;
+}
+
+export interface SoldProductRow {
+  variantId: string;
+  productName: string;
+  size: string;
+  color: string;
+  qtyInPerson: number;
+  qtyOnline: number;
+  qty: number;
+  total: Prisma.Decimal;
+}
+
+/**
+ * Groups sold lines by variant: in-person Sale rows (already filtered to
+ * non-voided) and items of paid orders (already deduped and status-filtered
+ * by the caller, same as mergeRevenue()). Sorted by quantity sold, desc.
+ */
+export function mergeSoldProducts(
+  inPerson: SoldLineForMerge[],
+  online: SoldLineForMerge[],
+): SoldProductRow[] {
+  const rows = new Map<string, SoldProductRow>();
+
+  const add = (line: SoldLineForMerge, channel: "qtyInPerson" | "qtyOnline") => {
+    const row = rows.get(line.variantId) ?? {
+      variantId: line.variantId,
+      productName: line.productName,
+      size: line.size,
+      color: line.color,
+      qtyInPerson: 0,
+      qtyOnline: 0,
+      qty: 0,
+      total: new Prisma.Decimal(0),
+    };
+    row[channel] += line.qty;
+    row.qty += line.qty;
+    row.total = row.total.plus(new Prisma.Decimal(line.unitPrice).times(line.qty));
+    rows.set(line.variantId, row);
+  };
+
+  for (const line of inPerson) add(line, "qtyInPerson");
+  for (const line of online) add(line, "qtyOnline");
+
+  return [...rows.values()].sort(
+    (a, b) => b.qty - a.qty || a.productName.localeCompare(b.productName, "es-AR"),
+  );
+}
+
+const SOLD_VARIANT_SELECT = {
+  id: true,
+  size: true,
+  color: true,
+  product: { select: { name: true } },
+} as const;
+
+interface SoldVariant {
+  id: string;
+  size: string;
+  color: string;
+  product: { name: string };
+}
+
+function toSoldLine(line: {
+  qty: number;
+  unitPrice: Prisma.Decimal;
+  variant: SoldVariant;
+}): SoldLineForMerge {
+  return {
+    variantId: line.variant.id,
+    productName: line.variant.product.name,
+    size: line.variant.size,
+    color: line.variant.color,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+  };
+}
+
 export interface RevenueReport extends MergedRevenue {
   /** Half-open range actually queried — [from, to). */
   from: Date;
   to: Date;
   counts: { sales: number; voidedSales: number; orders: number };
+  /** Products sold in the range — in-person sales plus paid orders. */
+  soldProducts: SoldProductRow[];
   /** specs/sales-revenue/spec.md "Honest empty state for pre-ship-date
    * ranges": true when the ENTIRE requested range falls before this
    * change's ship date, meaning no in-person Sale data could possibly
@@ -120,7 +207,12 @@ export async function getRevenueReport(
   const [sales, voidedSalesCount, paidMovements] = await Promise.all([
     prisma.sale.findMany({
       where: { voidedAt: null, soldAt: { gte: from, lt: to } },
-      select: { paymentMethod: true, qty: true, unitPrice: true },
+      select: {
+        paymentMethod: true,
+        qty: true,
+        unitPrice: true,
+        variant: { select: SOLD_VARIANT_SELECT },
+      },
     }),
     prisma.sale.count({
       where: { voidedAt: { not: null }, soldAt: { gte: from, lt: to } },
@@ -143,11 +235,19 @@ export async function getRevenueReport(
     orderIds.length > 0
       ? await prisma.order.findMany({
           where: { id: { in: orderIds }, status: { in: ["PAID", "PICKED_UP"] } },
-          select: { method: true, paymentMethod: true, items: { select: { qty: true, unitPrice: true } } },
+          select: {
+            method: true,
+            paymentMethod: true,
+            items: { select: { qty: true, unitPrice: true, variant: { select: SOLD_VARIANT_SELECT } } },
+          },
         })
       : [];
 
   const merged = mergeRevenue(sales, orders);
+  const soldProducts = mergeSoldProducts(
+    sales.map(toSoldLine),
+    orders.flatMap((order) => order.items.map(toSoldLine)),
+  );
   const limitedData = to.getTime() <= CONTROL_DE_CAJA_SHIP_DATE.getTime();
 
   return {
@@ -155,6 +255,7 @@ export async function getRevenueReport(
     to,
     ...merged,
     counts: { sales: sales.length, voidedSales: voidedSalesCount, orders: orders.length },
+    soldProducts,
     limitedData,
   };
 }

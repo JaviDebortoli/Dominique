@@ -58,7 +58,8 @@ test.describe("Admin caja + reportes — sell, report, void (control-de-caja tas
 
     // --- Report shows it ----------------------------------------------
     await page.goto("/admin/reportes");
-    const salesRow = page.getByRole("row", { name: new RegExp(productName) });
+    const todaysSales = page.getByRole("table", { name: "Ventas de hoy" });
+    const salesRow = todaysSales.getByRole("row", { name: new RegExp(productName) });
     await expect(salesRow).toBeVisible();
     await expect(salesRow).toContainText("Efectivo");
 
@@ -76,9 +77,9 @@ test.describe("Admin caja + reportes — sell, report, void (control-de-caja tas
 
     // --- Report drops it, stock returns --------------------------------
     await page.reload();
-    await expect(page.getByRole("row", { name: new RegExp(`${productName}.*\\(anulada\\)`) })).toBeVisible();
+    await expect(todaysSales.getByRole("row", { name: new RegExp(`${productName}.*\\(anulada\\)`) })).toBeVisible();
     await expect(
-      page.getByRole("row", { name: new RegExp(productName) }).getByRole("button", { name: "Anular" }),
+      todaysSales.getByRole("row", { name: new RegExp(productName) }).getByRole("button", { name: "Anular" }),
     ).toHaveCount(0);
 
     await page.goto("/admin/caja");

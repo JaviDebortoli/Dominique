@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { createProduct } from "@/modules/catalog/product.service";
 import { confirmPaymentApproved, createPendingOrder } from "@/modules/orders/order.service";
 import { recordInStoreSale, voidSale } from "@/modules/sales/sale.service";
-import { getRevenueReport, mergeRevenue } from "./caja-report.service";
+import { argentinaTodayStr } from "@/lib/report-day";
+import { getRevenueReport, mergeRevenue, mergeSoldProducts } from "./caja-report.service";
 
 // control-de-caja tasks.md 5.3 — pure bucketing/merge logic, tested with
 // FAKED Q1/Q3 results (Testing Strategy: "Fake query results into the
@@ -115,6 +116,45 @@ describe("caja-report.service — mergeRevenue() (unit, faked inputs)", () => {
 // specs/sales-revenue/spec.md's remaining scenarios: no double-counting,
 // voided-sale exclusion, single-day/range filters, and the honest
 // pre-ship-date empty state.
+describe("caja-report.service — mergeSoldProducts() (unit, faked inputs)", () => {
+  it("groups in-person sales and order items by variant, summing qty and amount", () => {
+    const result = mergeSoldProducts(
+      [
+        { variantId: "v1", productName: "Remera", size: "M", color: "Negro", qty: 1, unitPrice: 1000 },
+        { variantId: "v1", productName: "Remera", size: "M", color: "Negro", qty: 2, unitPrice: 1000 },
+      ],
+      [{ variantId: "v1", productName: "Remera", size: "M", color: "Negro", qty: 3, unitPrice: 1000 }],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      variantId: "v1",
+      productName: "Remera",
+      size: "M",
+      color: "Negro",
+      qtyInPerson: 3,
+      qtyOnline: 3,
+      qty: 6,
+    });
+    expect(result[0].total.toNumber()).toBe(6000);
+  });
+
+  it("keeps different variants on separate rows, sorted by quantity sold (desc)", () => {
+    const result = mergeSoldProducts(
+      [{ variantId: "v1", productName: "Remera", size: "M", color: "Negro", qty: 1, unitPrice: 1000 }],
+      [{ variantId: "v2", productName: "Pantalón", size: "40", color: "Azul", qty: 4, unitPrice: 5000 }],
+    );
+
+    expect(result.map((row) => row.variantId)).toEqual(["v2", "v1"]);
+    expect(result[0].qtyInPerson).toBe(0);
+    expect(result[1].qtyOnline).toBe(0);
+  });
+
+  it("returns an empty list when nothing was sold", () => {
+    expect(mergeSoldProducts([], [])).toEqual([]);
+  });
+});
+
 describe("caja-report.service — getRevenueReport() (integration, real Postgres)", () => {
   const createdProductIds: string[] = [];
   const createdCategoryIds: string[] = [];
@@ -134,7 +174,7 @@ describe("caja-report.service — getRevenueReport() (integration, real Postgres
   });
 
   function todayStr(): string {
-    return new Date().toISOString().slice(0, 10);
+    return argentinaTodayStr();
   }
 
   async function makeVariant(onHand: number, price = 10000) {
@@ -187,6 +227,45 @@ describe("caja-report.service — getRevenueReport() (integration, real Postgres
     const thisOrderTotal = 35000;
     expect(report.totals.MP.toNumber() % thisOrderTotal).toBe(0);
     expect(report.totals.MP.toNumber()).toBeGreaterThanOrEqual(thisOrderTotal);
+  });
+
+  it("lists products sold in the period from both in-person sales and paid orders, excluding voided sales", async () => {
+    const inStoreVariant = await makeVariant(5, 4000);
+    const onlineVariant = await makeVariant(5, 6000);
+    const voidedVariant = await makeVariant(5, 2000);
+
+    await recordInStoreSale(prisma, { variantId: inStoreVariant.id, qty: 2, paymentMethod: "CASH" });
+    const voided = await recordInStoreSale(prisma, {
+      variantId: voidedVariant.id,
+      qty: 1,
+      paymentMethod: "CASH",
+    });
+    await voidSale(prisma, { saleId: voided.id });
+
+    const order = await createPendingOrder(prisma, {
+      buyerName: "Comprador Productos",
+      phone: "3815550021",
+      email: `productos-${randomUUID()}@example.com`,
+      method: "MP",
+      items: [{ variantId: onlineVariant.id, qty: 1 }],
+    });
+    createdOrderIds.push(order.id);
+    await confirmPaymentApproved(prisma, {
+      orderId: order.id,
+      mpPaymentId: `mp-products-${randomUUID()}`,
+      amount: 6000,
+      rawPayload: { status: "approved" },
+    });
+
+    const report = await getRevenueReport(prisma, { from: todayStr(), to: todayStr() });
+
+    const inStoreRow = report.soldProducts.find((row) => row.variantId === inStoreVariant.id);
+    const onlineRow = report.soldProducts.find((row) => row.variantId === onlineVariant.id);
+    expect(inStoreRow).toMatchObject({ qtyInPerson: 2, qtyOnline: 0, qty: 2 });
+    expect(inStoreRow?.total.toNumber()).toBe(8000);
+    expect(onlineRow).toMatchObject({ qtyInPerson: 0, qtyOnline: 1, qty: 1 });
+    expect(onlineRow?.total.toNumber()).toBe(6000);
+    expect(report.soldProducts.some((row) => row.variantId === voidedVariant.id)).toBe(false);
   });
 
   it("excludes a voided sale from totals", async () => {

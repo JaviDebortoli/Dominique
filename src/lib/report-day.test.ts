@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveArgentinaDayStart, resolveReportRange } from "./report-day";
+import { argentinaTodayStr, resolveArgentinaDayStart, resolveReportRange } from "./report-day";
 
 // control-de-caja tasks.md 5.1 — design.md D5: fixed UTC−3 day boundaries
 // for the revenue report (business-days.ts's UTC-as-wall-clock shortcut is
@@ -39,5 +39,26 @@ describe("report-day — resolveReportRange() (tasks.md 5.1: the 21:30-ART-is-ne
 
     expect(range.from.toISOString()).toBe("2026-09-01T03:00:00.000Z");
     expect(range.to.toISOString()).toBe("2026-10-01T03:00:00.000Z");
+  });
+});
+
+describe("report-day — argentinaTodayStr()", () => {
+  it("returns the Argentina (UTC−3) calendar date, not the UTC one, after 21:00 ART", () => {
+    // 22:00 ART on 2026-10-14 is 01:00 UTC on 2026-10-15.
+    const result = argentinaTodayStr(new Date("2026-10-15T01:00:00.000Z"));
+
+    expect(result).toBe("2026-10-14");
+  });
+
+  it("triangulation: during the day the Argentina and UTC dates match", () => {
+    const result = argentinaTodayStr(new Date("2026-10-14T15:00:00.000Z"));
+
+    expect(result).toBe("2026-10-14");
+  });
+
+  it("exactly at 00:00 ART (03:00Z) the date rolls over to the new day", () => {
+    const result = argentinaTodayStr(new Date("2026-10-15T03:00:00.000Z"));
+
+    expect(result).toBe("2026-10-15");
   });
 });

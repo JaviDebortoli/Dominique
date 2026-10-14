@@ -5,7 +5,7 @@
 // Navigation" and specs/sales-revenue/spec.md "Revenue Aggregation by
 // Period and Payment Method".
 import { prisma } from "@/lib/db";
-import { resolveReportRange } from "@/lib/report-day";
+import { argentinaTodayStr, resolveReportRange } from "@/lib/report-day";
 import { getRevenueReport, type RevenueBucket } from "@/modules/reports/caja-report.service";
 import { VoidSaleButton } from "@/components/admin/VoidSaleButton";
 
@@ -13,10 +13,6 @@ export const dynamic = "force-dynamic";
 
 interface ReportesPageProps {
   searchParams: Promise<{ desde?: string; hasta?: string }>;
-}
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 const BUCKET_LABELS_ES_AR: Record<RevenueBucket, string> = {
@@ -40,15 +36,15 @@ function formatDateTime(date: Date): string {
 
 export default async function ReportesPage({ searchParams }: ReportesPageProps) {
   const { desde, hasta } = await searchParams;
-  const from = desde ?? todayStr();
-  const to = hasta ?? desde ?? todayStr();
+  const from = desde ?? argentinaTodayStr();
+  const to = hasta ?? desde ?? argentinaTodayStr();
 
   const report = await getRevenueReport(prisma, { from, to });
 
   // Today's individual sales — independent of the filter above, always
   // "today" (design.md: Anular only ever applies to the current caja day,
   // so this list is the one staff actually act on).
-  const todayRange = resolveReportRange({ from: todayStr(), to: todayStr() });
+  const todayRange = resolveReportRange({ from: argentinaTodayStr(), to: argentinaTodayStr() });
   const todaysSales = await prisma.sale.findMany({
     where: { soldAt: { gte: todayRange.from, lt: todayRange.to } },
     include: { variant: { include: { product: { select: { name: true } } } } },
@@ -131,9 +127,51 @@ export default async function ReportesPage({ searchParams }: ReportesPageProps) 
       </div>
 
       <div className="flex flex-col gap-3">
+        <h2 className="font-serif text-body-lg font-semibold text-ink">Productos vendidos en el período</h2>
+        <div className="overflow-x-auto border border-ink/15">
+          <table aria-label="Productos vendidos en el período" className="w-full border-collapse font-sans text-body-md text-ink">
+            <thead>
+              <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
+                <th className="px-4 py-3 font-semibold">Producto</th>
+                <th className="px-4 py-3 font-semibold">Variante</th>
+                <th className="px-4 py-3 text-center font-semibold">En local</th>
+                <th className="px-4 py-3 text-center font-semibold">Online</th>
+                <th className="px-4 py-3 text-center font-semibold">Total cant.</th>
+                <th className="px-4 py-3 text-right font-semibold">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.soldProducts.map((row) => (
+                <tr
+                  key={row.variantId}
+                  className="divide-x divide-ink/10 border-b border-ink/10 align-middle last:border-b-0"
+                >
+                  <td className="px-4 py-3">{row.productName}</td>
+                  <td className="px-4 py-3 text-on-surface-variant">
+                    {row.size} · {row.color}
+                  </td>
+                  <td className="px-4 py-3 text-center tabular-nums">{row.qtyInPerson}</td>
+                  <td className="px-4 py-3 text-center tabular-nums">{row.qtyOnline}</td>
+                  <td className="px-4 py-3 text-center tabular-nums">{row.qty}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{formatMoney(row.total.toNumber())}</td>
+                </tr>
+              ))}
+              {report.soldProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-outline">
+                    No hay productos vendidos en este período.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
         <h2 className="font-serif text-body-lg font-semibold text-ink">Ventas de hoy</h2>
         <div className="overflow-x-auto border border-ink/15">
-          <table className="w-full border-collapse font-sans text-body-md text-ink">
+          <table aria-label="Ventas de hoy" className="w-full border-collapse font-sans text-body-md text-ink">
             <thead>
               <tr className="divide-x divide-ink/10 border-b border-ink/20 bg-surface text-left align-middle font-sans text-label-caps uppercase tracking-widest text-outline">
                 <th className="px-4 py-3 font-semibold">Producto</th>

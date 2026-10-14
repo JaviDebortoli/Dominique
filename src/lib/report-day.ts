@@ -29,6 +29,16 @@ export function resolveArgentinaDayStart(dateStr: string): Date {
   return new Date(Date.UTC(year, month - 1, day, ARGENTINA_UTC_OFFSET_HOURS, 0, 0, 0));
 }
 
+/**
+ * Today's calendar date in Argentina (UTC−3) as `YYYY-MM-DD`. Using
+ * `new Date().toISOString().slice(0, 10)` instead would return TOMORROW
+ * between 21:00 and 00:00 ART, so the default report would be empty.
+ */
+export function argentinaTodayStr(now: Date = new Date()): string {
+  const shifted = new Date(now.getTime() - ARGENTINA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  return shifted.toISOString().slice(0, 10);
+}
+
 export interface ReportDayRange {
   /** Inclusive start instant. */
   from: Date;
