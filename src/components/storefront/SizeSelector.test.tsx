@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SizeSelector } from "./SizeSelector";
 
@@ -301,6 +301,93 @@ describe("SizeSelector", () => {
       expect(pushMock).toHaveBeenCalledWith(
         `/checkout?variante=${encodeURIComponent("v-l/needs encoding")}`,
       );
+    });
+  });
+
+  describe("add-to-cart confirmation feedback", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function deferred() {
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      const promise = new Promise<void>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    it("shows Agregando… and disables the button while the add is in progress", async () => {
+      const user = userEvent.setup();
+      const pending = deferred();
+      render(<SizeSelector variants={variants} onAddToCart={() => pending.promise} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+
+      expect(screen.getByRole("button", { name: "Agregando…" })).toBeDisabled();
+      await act(async () => pending.resolve());
+    });
+
+    it("shows Agregado and disables the button once the add succeeds", async () => {
+      const user = userEvent.setup();
+      const onAddToCart = vi.fn(async () => {});
+      render(<SizeSelector variants={variants} onAddToCart={onAddToCart} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+
+      const added = await screen.findByRole("button", { name: "Agregado" });
+      expect(added).toBeDisabled();
+      expect(onAddToCart).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns to Agregar al carrito after the confirmation delay", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<SizeSelector variants={variants} onAddToCart={async () => {}} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      await screen.findByRole("button", { name: "Agregado" });
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
+    });
+
+    it("does not show Agregado when the add fails", async () => {
+      const user = userEvent.setup();
+      const pending = deferred();
+      render(<SizeSelector variants={variants} onAddToCart={() => pending.promise} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      await act(async () => pending.reject(new Error("network")));
+
+      expect(screen.queryByRole("button", { name: "Agregado" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
+    });
+
+    it("clears the Agregado confirmation when another size is selected", async () => {
+      const user = userEvent.setup();
+      const twoSizes = [
+        { id: "v-s", size: "S", color: "Negro", available: 3, isAvailable: true },
+        { id: "v-l", size: "L", color: "Negro", available: 2, isAvailable: true },
+      ];
+      render(<SizeSelector variants={twoSizes} onAddToCart={async () => {}} />);
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      await screen.findByRole("button", { name: "Agregado" });
+
+      await user.click(screen.getByRole("button", { name: "L" }));
+
+      expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
     });
   });
 });

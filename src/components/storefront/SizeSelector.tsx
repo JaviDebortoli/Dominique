@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 // Backs specs/storefront-browsing/spec.md:
@@ -35,6 +35,16 @@ import { useRouter } from "next/navigation";
 // navigates client-side (useRouter) to /checkout?variante=<id> instead of
 // calling onAddToCart. Stock is re-validated server-side on that page/the
 // submit; this button only gates on the already-known isAvailable flag.
+//
+// Add-to-cart confirmation: while onAddToCart is pending the button reads
+// "Agregando…"; once it resolves it reads "Agregado" for
+// ADDED_FEEDBACK_MS, disabled so a double click cannot add twice. A failed
+// add returns straight to the normal label. Changing size or color clears
+// the confirmation.
+
+const ADDED_FEEDBACK_MS = 2000;
+
+type AddStatus = "idle" | "adding" | "added";
 
 export interface SizeOption {
   id: string;
@@ -46,7 +56,7 @@ export interface SizeOption {
 
 export interface SizeSelectorProps {
   variants: SizeOption[];
-  onAddToCart?: (variantId: string) => void;
+  onAddToCart?: (variantId: string) => void | Promise<unknown>;
   /** variantId -> qty already in the cart, read server-side from the cart
    * cookie (producto/[slug]/page.tsx). Absent entries count as 0. */
   inCartQty?: Record<string, number>;
@@ -56,6 +66,13 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
   const router = useRouter();
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [addStatus, setAddStatus] = useState<AddStatus>("idle");
+
+  useEffect(() => {
+    if (addStatus !== "added") return;
+    const timeout = setTimeout(() => setAddStatus("idle"), ADDED_FEEDBACK_MS);
+    return () => clearTimeout(timeout);
+  }, [addStatus]);
 
   // Distinct sizes, order of first appearance (spec: stable ordering).
   const sizes = variants.reduce<string[]>(
@@ -70,9 +87,11 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
   const canAddToCart =
     selected !== null && selected.isAvailable && (inCartQty[selected.id] ?? 0) < selected.available;
   const canBuyNow = selected !== null && selected.isAvailable;
+  const isAddButtonEnabled = canAddToCart && addStatus === "idle";
 
   function handleSelectSize(size: string) {
     setSelectedSize(size);
+    setAddStatus("idle");
     const colorsForSize = variants.filter((variant) => variant.size === size);
     // Auto-select the only color for this size (single-color products
     // behave as today); otherwise clear the previous color choice.
@@ -81,6 +100,18 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
 
   function handleSelectColor(variantId: string) {
     setSelectedId(variantId);
+    setAddStatus("idle");
+  }
+
+  async function handleAddToCart() {
+    if (!selected) return;
+    setAddStatus("adding");
+    try {
+      await onAddToCart?.(selected.id);
+      setAddStatus("added");
+    } catch {
+      setAddStatus("idle");
+    }
   }
 
   function handleBuyNow() {
@@ -158,16 +189,25 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
       <div className="flex flex-col gap-3">
         <button
           type="button"
-          disabled={!canAddToCart}
-          onClick={() => selected && onAddToCart?.(selected.id)}
+          disabled={!isAddButtonEnabled}
+          onClick={handleAddToCart}
+          aria-live="polite"
           className={[
-            "w-full px-8 py-3 font-sans text-label-caps uppercase tracking-widest",
-            canAddToCart
-              ? "bg-nude text-ink hover:opacity-90"
-              : "cursor-not-allowed bg-surface-container text-outline",
+            "w-full px-8 py-3 font-sans text-label-caps uppercase tracking-widest transition-colors",
+            addStatus === "added"
+              ? "cursor-default bg-ink text-paper"
+              : isAddButtonEnabled
+                ? "bg-nude text-ink hover:opacity-90"
+                : "cursor-not-allowed bg-surface-container text-outline",
           ].join(" ")}
         >
-          {atCap ? "Ya tenés el máximo disponible" : "Agregar al carrito"}
+          {addStatus === "adding"
+            ? "Agregando…"
+            : addStatus === "added"
+              ? "Agregado"
+              : atCap
+                ? "Ya tenés el máximo disponible"
+                : "Agregar al carrito"}
         </button>
         <button
           type="button"
