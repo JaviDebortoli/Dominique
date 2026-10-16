@@ -41,10 +41,15 @@ import { useRouter } from "next/navigation";
 // ADDED_FEEDBACK_MS, disabled so a double click cannot add twice. A failed
 // add returns straight to the normal label. Changing size or color clears
 // the confirmation.
+//
+// Undo: when onUndoAdd is provided, "Agregado" stays pressable for that same
+// ADDED_FEEDBACK_MS window; pressing it reads "Quitando…" and removes only the
+// unit just added, then returns to "Agregar al carrito". Without onUndoAdd,
+// "Agregado" stays disabled as before.
 
 const ADDED_FEEDBACK_MS = 2000;
 
-type AddStatus = "idle" | "adding" | "added";
+type AddStatus = "idle" | "adding" | "added" | "removing";
 
 export interface SizeOption {
   id: string;
@@ -57,12 +62,19 @@ export interface SizeOption {
 export interface SizeSelectorProps {
   variants: SizeOption[];
   onAddToCart?: (variantId: string) => void | Promise<unknown>;
+  /** Undoes the last add (one unit) when "Agregado" is pressed. */
+  onUndoAdd?: (variantId: string) => void | Promise<unknown>;
   /** variantId -> qty already in the cart, read server-side from the cart
    * cookie (producto/[slug]/page.tsx). Absent entries count as 0. */
   inCartQty?: Record<string, number>;
 }
 
-export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSelectorProps) {
+export function SizeSelector({
+  variants,
+  onAddToCart,
+  onUndoAdd,
+  inCartQty = {},
+}: SizeSelectorProps) {
   const router = useRouter();
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -87,7 +99,8 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
   const canAddToCart =
     selected !== null && selected.isAvailable && (inCartQty[selected.id] ?? 0) < selected.available;
   const canBuyNow = selected !== null && selected.isAvailable;
-  const isAddButtonEnabled = canAddToCart && addStatus === "idle";
+  const canUndo = addStatus === "added" && onUndoAdd !== undefined;
+  const isAddButtonEnabled = (canAddToCart && addStatus === "idle") || canUndo;
 
   function handleSelectSize(size: string) {
     setSelectedSize(size);
@@ -103,8 +116,19 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
     setAddStatus("idle");
   }
 
+  async function handleUndoAdd() {
+    if (!selected) return;
+    setAddStatus("removing");
+    try {
+      await onUndoAdd?.(selected.id);
+    } finally {
+      setAddStatus("idle");
+    }
+  }
+
   async function handleAddToCart() {
     if (!selected) return;
+    if (canUndo) return handleUndoAdd();
     setAddStatus("adding");
     try {
       await onAddToCart?.(selected.id);
@@ -194,8 +218,8 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
           aria-live="polite"
           className={[
             "w-full px-8 py-3 font-sans text-label-caps uppercase tracking-widest transition-colors",
-            addStatus === "added"
-              ? "cursor-default bg-ink text-paper"
+            addStatus === "added" || addStatus === "removing"
+              ? `${canUndo ? "" : "cursor-default "}bg-ink text-paper`
               : isAddButtonEnabled
                 ? "bg-nude text-ink hover:opacity-90"
                 : "cursor-not-allowed bg-surface-container text-outline",
@@ -203,6 +227,8 @@ export function SizeSelector({ variants, onAddToCart, inCartQty = {} }: SizeSele
         >
           {addStatus === "adding"
             ? "Agregando…"
+            : addStatus === "removing"
+              ? "Quitando…"
             : addStatus === "added"
               ? "Agregado"
               : atCap

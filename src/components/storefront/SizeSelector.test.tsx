@@ -373,6 +373,66 @@ describe("SizeSelector", () => {
       expect(screen.getByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
     });
 
+    it("removes the just-added unit when Agregado is pressed and returns to Agregar al carrito", async () => {
+      const user = userEvent.setup();
+      const onAddToCart = vi.fn(async () => {});
+      const onUndoAdd = vi.fn(async () => {});
+      render(
+        <SizeSelector variants={variants} onAddToCart={onAddToCart} onUndoAdd={onUndoAdd} />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      const added = await screen.findByRole("button", { name: "Agregado" });
+      expect(added).toBeEnabled();
+
+      await user.click(added);
+
+      expect(onUndoAdd).toHaveBeenCalledTimes(1);
+      expect(onUndoAdd).toHaveBeenCalledWith("v-s");
+      expect(onAddToCart).toHaveBeenCalledTimes(1);
+      expect(await screen.findByRole("button", { name: /^agregar al carrito$/i })).toBeEnabled();
+    });
+
+    it("cannot undo once the 2-second confirmation has expired", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const onUndoAdd = vi.fn(async () => {});
+      render(
+        <SizeSelector variants={variants} onAddToCart={async () => {}} onUndoAdd={onUndoAdd} />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      await screen.findByRole("button", { name: "Agregado" });
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(screen.queryByRole("button", { name: "Agregado" })).not.toBeInTheDocument();
+      expect(onUndoAdd).not.toHaveBeenCalled();
+    });
+
+    it("shows Quitando… and disables the button while the undo is in progress", async () => {
+      const user = userEvent.setup();
+      const pending = deferred();
+      render(
+        <SizeSelector
+          variants={variants}
+          onAddToCart={async () => {}}
+          onUndoAdd={() => pending.promise}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "S" }));
+      await user.click(screen.getByRole("button", { name: /^agregar al carrito$/i }));
+      await user.click(await screen.findByRole("button", { name: "Agregado" }));
+
+      expect(screen.getByRole("button", { name: "Quitando…" })).toBeDisabled();
+      await act(async () => pending.resolve());
+    });
+
     it("clears the Agregado confirmation when another size is selected", async () => {
       const user = userEvent.setup();
       const twoSizes = [

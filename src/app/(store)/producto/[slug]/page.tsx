@@ -5,7 +5,7 @@ import { summarizeVariantAvailability } from "@/modules/catalog/variant-availabi
 import { formatPriceARS } from "@/lib/format-price";
 import { ProductGallery } from "@/components/storefront/ProductGallery";
 import { SizeSelector } from "@/components/storefront/SizeSelector";
-import { addOneToCart, getCart } from "@/modules/cart/cart-cookie";
+import { addOneToCart, getCart, removeOneFromCart } from "@/modules/cart/cart-cookie";
 
 // Product Detail Page. Backs specs/storefront-browsing/spec.md:
 //   - "Product Detail Page Variant Selector" (enable in-stock, disable
@@ -61,7 +61,12 @@ export default async function ProductPage({
             {product.description}
           </p>
         ) : null}
-        <SizeSelector variants={variantOptions} onAddToCart={addOneToCart} inCartQty={inCartQty} />
+        <SizeSelector
+          variants={variantOptions}
+          onAddToCart={addOneToCart}
+          onUndoAdd={removeOneFromCart}
+          inCartQty={inCartQty}
+        />
       </div>
     </section>
   );

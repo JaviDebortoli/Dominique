@@ -70,6 +70,20 @@ export async function addOneToCart(variantId: string): Promise<Cart> {
 }
 
 /**
+ * Single-arg Server Action wired to SizeSelector's `onUndoAdd` prop: pressing
+ * "Agregado" undoes that add by subtracting exactly one unit of the variant
+ * (removing the line when it reaches 0), never the units added earlier.
+ */
+export async function removeOneFromCart(variantId: string): Promise<Cart> {
+  const current = await getCart();
+  const qty = current.find((item) => item.variantId === variantId)?.qty ?? 0;
+  const cart = updateQty(current, variantId, qty - 1);
+  await writeCart(cart);
+  refresh();
+  return cart;
+}
+
+/**
  * Server Action bound per-line in `/carrito` (design.md's CartLineControls
  * contract, `.bind(null, variantId)`). Delegates to `updateQty`'s existing
  * `qty <= 0 → removeItem` guard as a defensive server-side path — the

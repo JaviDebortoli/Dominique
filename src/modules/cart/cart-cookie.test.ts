@@ -19,6 +19,44 @@ function mockCookieStore() {
   return { set };
 }
 
+function mockCookieStoreWith(cart: { variantId: string; qty: number }[]) {
+  const set = vi.fn();
+  mockedCookies.mockResolvedValue({
+    get: () => ({ value: JSON.stringify(cart) }),
+    set,
+  } as unknown as Awaited<ReturnType<typeof cookies>>);
+  return { set };
+}
+
+describe("cart-cookie: removeOneFromCart (undo of Agregado)", () => {
+  it("subtracts only the last added unit when the variant has more than one", async () => {
+    const { removeOneFromCart } = await import("./cart-cookie");
+    const { set } = mockCookieStoreWith([
+      { variantId: "variant-1", qty: 3 },
+      { variantId: "variant-2", qty: 1 },
+    ]);
+
+    await removeOneFromCart("variant-1");
+
+    expect(JSON.parse(set.mock.calls[0][1])).toEqual([
+      { variantId: "variant-1", qty: 2 },
+      { variantId: "variant-2", qty: 1 },
+    ]);
+  });
+
+  it("removes the line when the variant had a single unit", async () => {
+    const { removeOneFromCart } = await import("./cart-cookie");
+    const { set } = mockCookieStoreWith([
+      { variantId: "variant-1", qty: 1 },
+      { variantId: "variant-2", qty: 2 },
+    ]);
+
+    await removeOneFromCart("variant-1");
+
+    expect(JSON.parse(set.mock.calls[0][1])).toEqual([{ variantId: "variant-2", qty: 2 }]);
+  });
+});
+
 describe("cart-cookie: cookie lifetime", () => {
   it("writes the cart cookie with a 7-day maxAge", async () => {
     const { addOneToCart } = await import("./cart-cookie");
