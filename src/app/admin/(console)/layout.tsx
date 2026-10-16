@@ -14,7 +14,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
   return (
     <div className="min-h-screen bg-paper">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-ink/20 px-margin-mobile py-4 md:px-gutter">
-        <nav className="flex gap-6 font-sans text-body-md text-ink">
+        <nav className="flex flex-wrap gap-x-6 gap-y-2 font-sans text-body-md text-ink">
           <Link href="/admin/caja">Caja</Link>
           <Link href="/admin/productos">Productos</Link>
           <Link href="/admin/categorias">Categorías</Link>
@@ -22,7 +22,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
           <Link href="/admin/reportes">Reportes</Link>
         </nav>
         <div className="flex items-center gap-4 font-sans text-body-md text-ink">
-          {session?.user?.email ? <span className="text-outline">{session.user.email}</span> : null}
+          {session?.user?.email ? <span className="min-w-0 break-all text-outline">{session.user.email}</span> : null}
           <form action={signOutAction}>
             <button
               type="submit"

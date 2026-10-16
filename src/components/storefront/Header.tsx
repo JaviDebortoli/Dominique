@@ -29,7 +29,7 @@ export function Header({ categories, cartCount }: HeaderProps) {
       </div>
       <header className="sticky top-0 z-50 w-full border-b border-ink bg-surface">
         <div className="relative mx-auto flex w-full max-w-container flex-wrap items-center justify-between gap-y-2 px-margin-mobile py-4 md:flex-nowrap md:justify-center md:px-gutter">
-          <div className="flex items-center gap-3">
+          <div className="flex w-full items-center justify-center gap-3 md:w-auto">
             {/* Circular "D" emblem, pinned to the left margin — mirrors the
                 right-side cluster. Sits beside the wordmark in normal flow
                 below md; absolute-anchored to the header's left edge at md
@@ -62,10 +62,10 @@ export function Header({ categories, cartCount }: HeaderProps) {
           </div>
           {/* Below md the cluster stays in normal flow (design.md "Resolved:
               Mobile Header Layout") so it can never overlap the centered
-              wordmark at ~320px; flex-wrap drops it to its own row when the
-              two boxes don't fit side by side. At md and up it returns to the
+              wordmark at ~320px; it takes its own full-width row, right-aligned,
+              under the centered wordmark. At md and up it returns to the
               absolute-anchored right position over the centered wordmark. */}
-          <div className="flex items-center gap-6 md:absolute md:right-gutter md:top-1/2 md:-translate-y-1/2">
+          <div className="flex w-full items-center justify-end gap-6 md:absolute md:w-auto md:right-gutter md:top-1/2 md:-translate-y-1/2">
             <CategoryMenu categories={categories} />
             <Link
               href="/carrito"
